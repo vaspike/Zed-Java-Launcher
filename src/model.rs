@@ -136,6 +136,8 @@ pub struct GroupItem {
     pub enabled: bool,
     #[serde(default)]
     pub delay_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 fn enabled() -> bool {
     true

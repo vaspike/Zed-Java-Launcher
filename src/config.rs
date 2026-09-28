@@ -184,6 +184,7 @@ pub fn import_vscode(project: &Project, config: &mut Config) -> Result<Vec<Strin
                         entry: id.clone(),
                         enabled: item.get("enabled").and_then(Value::as_bool).unwrap_or(true),
                         delay_ms: item.get("delay").and_then(Value::as_u64).unwrap_or(0),
+                        name: None,
                     }),
                     _ => {
                         unresolved = true;

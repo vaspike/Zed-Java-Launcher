@@ -72,6 +72,7 @@ pub struct DapServer<W: Write> {
     child: Arc<Mutex<Option<Child>>>,
     group_members: Arc<Mutex<Vec<String>>>,
     entry_id: Arc<Mutex<Option<String>>>,
+    display_name: Arc<Mutex<Option<String>>>,
     terminated: Arc<AtomicBool>,
 }
 
@@ -85,6 +86,7 @@ impl<W: Write + Send + 'static> DapServer<W> {
             child: Arc::new(Mutex::new(None)),
             group_members: Arc::new(Mutex::new(Vec::new())),
             entry_id: Arc::new(Mutex::new(None)),
+            display_name: Arc::new(Mutex::new(None)),
             terminated: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -191,9 +193,15 @@ impl<W: Write + Send + 'static> DapServer<W> {
                 self.send_response(req_seq, command, true, None, None)?;
             }
             "threads" => {
+                let name = self
+                    .display_name
+                    .lock()
+                    .unwrap()
+                    .clone()
+                    .unwrap_or_else(|| "main".to_string());
                 let body = json!({
                     "threads": [
-                        { "id": 1, "name": "main" }
+                        { "id": 1, "name": name }
                     ]
                 });
                 self.send_response(req_seq, command, true, Some(body), None)?;
@@ -276,6 +284,7 @@ impl<W: Write + Send + 'static> DapServer<W> {
 
     fn launch_group(&self, req_seq: u64, group_name: &str) -> Result<()> {
         dap_log(&format!("Launching group: {group_name}"));
+        *self.display_name.lock().unwrap() = Some(format!("Group: {group_name}"));
         let mut config = config::load(&self.config_path).unwrap_or_default();
         if config.groups.is_empty() {
             let project = scan::scan(&self.root)?;
@@ -313,12 +322,13 @@ impl<W: Write + Send + 'static> DapServer<W> {
         // Send DAP reverse request `startDebugging` for each enabled service
         for item in &enabled {
             let child_seq = self.next_seq();
-            let label = item
-                .entry
-                .rsplit('.')
-                .next()
-                .unwrap_or(&item.entry)
-                .to_string();
+            let label = item.name.clone().unwrap_or_else(|| {
+                item.entry
+                    .rsplit('.')
+                    .next()
+                    .unwrap_or(&item.entry)
+                    .to_string()
+            });
             let start_debug_req = json!({
                 "seq": child_seq,
                 "type": "request",
@@ -326,6 +336,7 @@ impl<W: Write + Send + 'static> DapServer<W> {
                 "arguments": {
                     "request": "launch",
                     "configuration": {
+                        "name": label,
                         "adapter": "java-launcher",
                         "request": "launch",
                         "label": label,
@@ -370,6 +381,22 @@ impl<W: Write + Send + 'static> DapServer<W> {
         dap_log(&format!("Launching single service: {entry_query}"));
         let project = scan::scan(&self.root)?;
         let entry = project.entry(entry_query)?;
+
+        let display_name = args
+            .get("name")
+            .and_then(Value::as_str)
+            .or_else(|| args.get("label").and_then(Value::as_str))
+            .map(ToString::to_string)
+            .unwrap_or_else(|| {
+                entry
+                    .class
+                    .rsplit('.')
+                    .next()
+                    .unwrap_or(&entry.id)
+                    .to_string()
+            });
+        *self.display_name.lock().unwrap() = Some(display_name.clone());
+
         let config = config::load(&self.config_path).unwrap_or_default();
         let mut options = config.options(&entry.id);
 
@@ -480,7 +507,7 @@ impl<W: Write + Send + 'static> DapServer<W> {
         self.send_event(
             "process",
             Some(json!({
-                "name": entry.class,
+                "name": display_name,
                 "systemProcessId": pid,
                 "isLocalProcess": true,
                 "startMethod": "launch",
@@ -613,5 +640,58 @@ impl<W: Write + Send + 'static> DapServer<W> {
         });
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn test_dap_threads_return_service_and_group_name() {
+        #[derive(Clone)]
+        struct SharedWriter(Arc<Mutex<Vec<u8>>>);
+        impl Write for SharedWriter {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().write(buf)
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                self.0.lock().unwrap().flush()
+            }
+        }
+
+        let output = Arc::new(Mutex::new(Vec::new()));
+        let writer = SharedWriter(output.clone());
+        let server = DapServer::new(
+            writer,
+            PathBuf::from("/nonexistent"),
+            PathBuf::from("/nonexistent"),
+        );
+
+        // Before launch: threads returns "main"
+        server.handle_request(1, "threads", &json!({})).unwrap();
+        let msgs = output.lock().unwrap().clone();
+        let mut cursor = Cursor::new(msgs);
+        let resp = read_dap_message(&mut cursor).unwrap().unwrap();
+        assert_eq!(resp["body"]["threads"][0]["name"], "main");
+
+        // Manually set display name as done during launch
+        *server.display_name.lock().unwrap() = Some("SystemApplication".to_string());
+        output.lock().unwrap().clear();
+        server.handle_request(2, "threads", &json!({})).unwrap();
+        let msgs = output.lock().unwrap().clone();
+        let mut cursor = Cursor::new(msgs);
+        let resp = read_dap_message(&mut cursor).unwrap().unwrap();
+        assert_eq!(resp["body"]["threads"][0]["name"], "SystemApplication");
+
+        // For group session
+        *server.display_name.lock().unwrap() = Some("Group: uis".to_string());
+        output.lock().unwrap().clear();
+        server.handle_request(3, "threads", &json!({})).unwrap();
+        let msgs = output.lock().unwrap().clone();
+        let mut cursor = Cursor::new(msgs);
+        let resp = read_dap_message(&mut cursor).unwrap().unwrap();
+        assert_eq!(resp["body"]["threads"][0]["name"], "Group: uis");
     }
 }
