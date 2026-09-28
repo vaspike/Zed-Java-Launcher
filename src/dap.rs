@@ -3,9 +3,10 @@ use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::{
     fs::OpenOptions,
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Read, Write},
+    net::TcpStream,
     os::unix::process::CommandExt,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -64,9 +65,119 @@ pub fn write_dap_message<W: Write>(writer: &mut W, val: &Value) -> Result<()> {
     Ok(())
 }
 
+fn dirs_home() -> Option<PathBuf> {
+    std::env::var("HOME").ok().map(PathBuf::from)
+}
+
+fn hex_decode(s: &str) -> Result<Vec<u8>, ()> {
+    if s.len() % 2 != 0 {
+        return Err(());
+    }
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|_| ()))
+        .collect()
+}
+
+fn find_jdtls_proxy_port(root: &Path) -> Option<u16> {
+    let hex_root: String = root
+        .to_string_lossy()
+        .as_bytes()
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect();
+
+    let home = dirs_home()?;
+    let candidate_dirs = [
+        home.join("Library/Application Support/Zed/extensions/work/java/proxy"),
+        home.join("Library/Application Support/Zed (Preview)/extensions/work/java/proxy"),
+        home.join(".local/share/zed/extensions/work/java/proxy"),
+        home.join(".local/share/zed-preview/extensions/work/java/proxy"),
+    ];
+
+    for dir in &candidate_dirs {
+        let file = dir.join(&hex_root);
+        if file.exists() {
+            if let Ok(content) = std::fs::read_to_string(&file) {
+                if let Ok(port) = content.trim().parse::<u16>() {
+                    dap_log(&format!("Found JDTLS proxy port {port} at {}", file.display()));
+                    return Some(port);
+                }
+            }
+        }
+    }
+
+    for dir in &candidate_dirs {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if let Ok(decoded_bytes) = hex_decode(&name) {
+                    if let Ok(decoded_path) = String::from_utf8(decoded_bytes) {
+                        if root.starts_with(&decoded_path) || Path::new(&decoded_path).starts_with(root) {
+                            if let Ok(content) = std::fs::read_to_string(entry.path()) {
+                                if let Ok(port) = content.trim().parse::<u16>() {
+                                    dap_log(&format!("Found matching JDTLS proxy port {port} for {}", decoded_path));
+                                    return Some(port);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn request_jdtls_dap_port(http_port: u16) -> Result<u16> {
+    let mut stream = TcpStream::connect(("127.0.0.1", http_port))
+        .with_context(|| format!("Failed to connect to JDTLS HTTP proxy on port {http_port}"))?;
+    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+    stream.set_write_timeout(Some(Duration::from_secs(5)))?;
+
+    let payload = serde_json::to_string(&json!({
+        "method": "workspace/executeCommand",
+        "params": {
+            "command": "vscode.java.startDebugSession"
+        }
+    }))?;
+    let req = format!(
+        "POST / HTTP/1.1\r\nHost: 127.0.0.1:{http_port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+        payload.len()
+    );
+    stream.write_all(req.as_bytes())?;
+    stream.flush()?;
+
+    let mut resp = String::new();
+    stream.read_to_string(&mut resp)?;
+
+    let body_start = resp
+        .find("\r\n\r\n")
+        .context("Invalid HTTP response from JDTLS proxy")?
+        + 4;
+    let body = &resp[body_start..];
+    let parsed: Value =
+        serde_json::from_str(body).context("Invalid JSON in JDTLS proxy response")?;
+    let dap_port = parsed
+        .get("result")
+        .and_then(Value::as_u64)
+        .context("No DAP port returned by JDTLS")? as u16;
+
+    dap_log(&format!("Allocated JDTLS DAP port {dap_port}"));
+    Ok(dap_port)
+}
+
+fn allocate_free_port() -> Result<u16> {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+    let port = listener.local_addr()?.port();
+    drop(listener);
+    Ok(port)
+}
+
 pub struct DapServer<W: Write> {
     writer: Arc<Mutex<W>>,
-    seq: AtomicU64,
+    seq: Arc<AtomicU64>,
     root: PathBuf,
     config_path: PathBuf,
     child: Arc<Mutex<Option<Child>>>,
@@ -74,13 +185,18 @@ pub struct DapServer<W: Write> {
     entry_id: Arc<Mutex<Option<String>>>,
     display_name: Arc<Mutex<Option<String>>>,
     terminated: Arc<AtomicBool>,
+    is_stopped: Arc<AtomicBool>,
+    jdtls_writer: Arc<Mutex<Option<TcpStream>>>,
+    jdtls_reader: Arc<Mutex<Option<BufReader<TcpStream>>>>,
+    jdtls_seq: Arc<AtomicU64>,
+    pending_breakpoints: Arc<Mutex<Vec<Value>>>,
 }
 
 impl<W: Write + Send + 'static> DapServer<W> {
     pub fn new(writer: W, root: PathBuf, config_path: PathBuf) -> Self {
         Self {
             writer: Arc::new(Mutex::new(writer)),
-            seq: AtomicU64::new(1),
+            seq: Arc::new(AtomicU64::new(1)),
             root,
             config_path,
             child: Arc::new(Mutex::new(None)),
@@ -88,6 +204,11 @@ impl<W: Write + Send + 'static> DapServer<W> {
             entry_id: Arc::new(Mutex::new(None)),
             display_name: Arc::new(Mutex::new(None)),
             terminated: Arc::new(AtomicBool::new(false)),
+            is_stopped: Arc::new(AtomicBool::new(false)),
+            jdtls_writer: Arc::new(Mutex::new(None)),
+            jdtls_reader: Arc::new(Mutex::new(None)),
+            jdtls_seq: Arc::new(AtomicU64::new(1000)),
+            pending_breakpoints: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -158,7 +279,7 @@ impl<W: Write + Send + 'static> DapServer<W> {
                 let seq = msg.get("seq").and_then(Value::as_u64).unwrap_or(0);
                 let command = msg.get("command").and_then(Value::as_str).unwrap_or("");
                 let args = msg.get("arguments").cloned().unwrap_or(json!({}));
-                if self.handle_request(seq, command, &args)? {
+                if self.handle_request(seq, command, &args, &msg)? {
                     break;
                 }
             } else if msg_type == "response" {
@@ -169,65 +290,107 @@ impl<W: Write + Send + 'static> DapServer<W> {
         Ok(())
     }
 
-    fn handle_request(&self, req_seq: u64, command: &str, args: &Value) -> Result<bool> {
+    fn handle_request(
+        &self,
+        req_seq: u64,
+        command: &str,
+        args: &Value,
+        raw_msg: &Value,
+    ) -> Result<bool> {
         match command {
             "initialize" => {
-                let body = json!({
-                    "supportsConfigurationDoneRequest": true,
-                    "supportsTerminateRequest": true,
-                    "supportsRestartRequest": true,
-                });
-                self.send_response(req_seq, command, true, Some(body), None)?;
-                self.send_event("initialized", None)?;
+                let mut connected_jdtls = false;
+                if let Some(proxy_port) = find_jdtls_proxy_port(&self.root) {
+                    match request_jdtls_dap_port(proxy_port) {
+                        Ok(dap_port) => match TcpStream::connect(("127.0.0.1", dap_port)) {
+                            Ok(stream) => match stream.try_clone() {
+                                Ok(reader_stream) => {
+                                    let mut jdtls_w = stream;
+                                    let mut jdtls_r = BufReader::new(reader_stream);
+                                    let mut init_forward = raw_msg.clone();
+                                    if let Some(args_obj) = init_forward
+                                        .get_mut("arguments")
+                                        .and_then(Value::as_object_mut)
+                                    {
+                                        args_obj.insert("adapterID".to_string(), json!("java"));
+                                        args_obj.entry("linesStartAt1".to_string()).or_insert(json!(true));
+                                        args_obj.entry("columnsStartAt1".to_string()).or_insert(json!(true));
+                                        args_obj.entry("pathFormat".to_string()).or_insert(json!("path"));
+                                    }
+                                    if let Ok(()) =
+                                        write_dap_message(&mut jdtls_w, &init_forward)
+                                    {
+                                        if let Ok(Some(mut resp)) =
+                                            read_dap_message(&mut jdtls_r)
+                                        {
+                                            resp["request_seq"] = json!(req_seq);
+                                            resp["seq"] = json!(self.next_seq());
+                                            let _ = self.send(&resp);
+                                            *self.jdtls_writer.lock().unwrap() =
+                                                Some(jdtls_w);
+                                            *self.jdtls_reader.lock().unwrap() =
+                                                Some(jdtls_r);
+                                            connected_jdtls = true;
+                                            dap_log("Successfully initialized JDTLS DAP bridge");
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    dap_log(&format!("Failed to clone JDTLS socket: {e}"));
+                                }
+                            },
+                            Err(e) => {
+                                dap_log(&format!("Failed to connect to JDTLS DAP port: {e}"));
+                            }
+                        },
+                        Err(e) => {
+                            dap_log(&format!("Failed to request JDTLS DAP port: {e}"));
+                        }
+                    }
+                }
+
+                if !connected_jdtls {
+                    dap_log("Using standalone DAP initialization fallback");
+                    let body = json!({
+                        "supportsConfigurationDoneRequest": true,
+                        "supportsTerminateRequest": true,
+                        "supportsRestartRequest": true,
+                    });
+                    self.send_response(req_seq, command, true, Some(body), None)?;
+                    self.send_event("initialized", None)?;
+                }
             }
-            "configurationDone" => {
-                self.send_response(req_seq, command, true, None, None)?;
-            }
-            "setBreakpoints" => {
-                let body = json!({
-                    "breakpoints": []
-                });
-                self.send_response(req_seq, command, true, Some(body), None)?;
-            }
-            "setExceptionBreakpoints" => {
-                self.send_response(req_seq, command, true, None, None)?;
+            "launch" => {
+                self.handle_launch(req_seq, args)?;
             }
             "threads" => {
-                let name = self
-                    .display_name
-                    .lock()
-                    .unwrap()
-                    .clone()
-                    .unwrap_or_else(|| "main".to_string());
-                let body = json!({
-                    "threads": [
-                        { "id": 1, "name": name }
-                    ]
-                });
-                self.send_response(req_seq, command, true, Some(body), None)?;
-            }
-            "stackTrace" => {
-                let body = json!({
-                    "stackFrames": [],
-                    "totalFrames": 0
-                });
-                self.send_response(req_seq, command, true, Some(body), None)?;
-            }
-            "scopes" => {
-                let body = json!({
-                    "scopes": []
-                });
-                self.send_response(req_seq, command, true, Some(body), None)?;
-            }
-            "variables" => {
-                let body = json!({
-                    "variables": []
-                });
-                self.send_response(req_seq, command, true, Some(body), None)?;
+                let has_jdtls = self.jdtls_writer.lock().unwrap().is_some();
+                let is_stopped = self.is_stopped.load(Ordering::SeqCst);
+                if has_jdtls && is_stopped {
+                    if let Some(ref mut jw) = *self.jdtls_writer.lock().unwrap() {
+                        let _ = write_dap_message(jw, raw_msg);
+                    }
+                } else {
+                    let name = self
+                        .display_name
+                        .lock()
+                        .unwrap()
+                        .clone()
+                        .unwrap_or_else(|| "main".to_string());
+                    let body = json!({
+                        "threads": [
+                            { "id": 1, "name": name }
+                        ]
+                    });
+                    self.send_response(req_seq, command, true, Some(body), None)?;
+                }
             }
             "disconnect" | "terminate" => {
                 dap_log("Handling disconnect/terminate");
                 self.terminated.store(true, Ordering::SeqCst);
+                if let Some(mut jw) = self.jdtls_writer.lock().unwrap().take() {
+                    let _ = write_dap_message(&mut jw, raw_msg);
+                }
                 if let Some(mut child) = self.child.lock().unwrap().take() {
                     let pid = child.id() as i32;
                     unsafe {
@@ -262,12 +425,52 @@ impl<W: Write + Send + 'static> DapServer<W> {
                 self.send_event("terminated", None)?;
                 return Ok(true);
             }
-            "launch" => {
-                self.handle_launch(req_seq, args)?;
+            "setBreakpoints" => {
+                let has_jdtls = self.jdtls_writer.lock().unwrap().is_some();
+                let has_child = self.child.lock().unwrap().is_some();
+                if has_jdtls && !has_child {
+                    // Buffer breakpoints until JVM is attached
+                    self.pending_breakpoints.lock().unwrap().push(raw_msg.clone());
+                    let body = json!({ "breakpoints": [] });
+                    self.send_response(req_seq, command, true, Some(body), None)?;
+                } else if has_jdtls {
+                    if let Some(ref mut jw) = *self.jdtls_writer.lock().unwrap() {
+                        let _ = write_dap_message(jw, raw_msg);
+                    }
+                } else {
+                    let body = json!({ "breakpoints": [] });
+                    self.send_response(req_seq, command, true, Some(body), None)?;
+                }
             }
             _ => {
-                dap_log(&format!("Unhandled request: {command}"));
-                self.send_response(req_seq, command, true, None, None)?;
+                let has_jdtls = self.jdtls_writer.lock().unwrap().is_some();
+                if has_jdtls {
+                    if let Some(ref mut jw) = *self.jdtls_writer.lock().unwrap() {
+                        let _ = write_dap_message(jw, raw_msg);
+                    }
+                } else {
+                    match command {
+                        "configurationDone" | "setExceptionBreakpoints" => {
+                            self.send_response(req_seq, command, true, None, None)?;
+                        }
+                        "stackTrace" => {
+                            let body = json!({ "stackFrames": [], "totalFrames": 0 });
+                            self.send_response(req_seq, command, true, Some(body), None)?;
+                        }
+                        "scopes" => {
+                            let body = json!({ "scopes": [] });
+                            self.send_response(req_seq, command, true, Some(body), None)?;
+                        }
+                        "variables" => {
+                            let body = json!({ "variables": [] });
+                            self.send_response(req_seq, command, true, Some(body), None)?;
+                        }
+                        _ => {
+                            dap_log(&format!("Unhandled request in standalone mode: {command}"));
+                            self.send_response(req_seq, command, true, None, None)?;
+                        }
+                    }
+                }
             }
         }
         Ok(false)
@@ -284,6 +487,10 @@ impl<W: Write + Send + 'static> DapServer<W> {
 
     fn launch_group(&self, req_seq: u64, group_name: &str) -> Result<()> {
         dap_log(&format!("Launching group: {group_name}"));
+        // Drop any JDTLS connection since the orchestrator session does not debug a child directly
+        let _ = self.jdtls_writer.lock().unwrap().take();
+        let _ = self.jdtls_reader.lock().unwrap().take();
+
         *self.display_name.lock().unwrap() = Some(format!("Group: {group_name}"));
         let mut config = config::load(&self.config_path).unwrap_or_default();
         if config.groups.is_empty() {
@@ -408,12 +615,16 @@ impl<W: Write + Send + 'static> DapServer<W> {
             options.build = Some(false);
         }
 
-        let debug_port = args
-            .get("debugPort")
-            .and_then(Value::as_u64)
-            .map(|p| p as u16);
+        let has_jdtls = self.jdtls_writer.lock().unwrap().is_some();
+        let jdwp_port = if has_jdtls {
+            Some(allocate_free_port()?)
+        } else {
+            args.get("debugPort")
+                .and_then(Value::as_u64)
+                .map(|p| p as u16)
+        };
 
-        let mut plan = plan::build(&project, entry, &options, debug_port, false)?;
+        let mut plan = plan::build(&project, entry, &options, jdwp_port, has_jdtls)?;
         let env = config::environment(&self.root, &options)?;
 
         // Ensure classpath file exists
@@ -503,7 +714,144 @@ impl<W: Write + Send + 'static> DapServer<W> {
             );
         }
 
-        // DAP events
+        if let Some(port) = jdwp_port {
+            if has_jdtls {
+                let mut attached = false;
+                let mut last_err = String::new();
+                for attempt in 0..20 {
+                    thread::sleep(Duration::from_millis(50));
+                    let attach_seq = self.jdtls_seq.fetch_add(1, Ordering::SeqCst);
+                    let attach_req = json!({
+                        "seq": attach_seq,
+                        "type": "request",
+                        "command": "attach",
+                        "arguments": {
+                            "hostName": "127.0.0.1",
+                            "port": port,
+                            "projectName": entry.module
+                        }
+                    });
+                    {
+                        let mut jw_guard = self.jdtls_writer.lock().unwrap();
+                        if let Some(ref mut jw) = *jw_guard {
+                            if let Err(e) = write_dap_message(jw, &attach_req) {
+                                last_err = format!("Failed to send attach: {e}");
+                                continue;
+                            }
+                        }
+                    }
+
+                    // Read until attach response
+                    let mut jr_guard = self.jdtls_reader.lock().unwrap();
+                    if let Some(ref mut jr) = *jr_guard {
+                        let mut got_attach_resp = false;
+                        while let Ok(Some(msg)) = read_dap_message(jr) {
+                            dap_log(&format!("JDTLS attach handshake: {:?}", msg));
+                            let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
+                            if msg_type == "event" {
+                                let event = msg.get("event").and_then(Value::as_str).unwrap_or("");
+                                if event == "initialized" {
+                                    self.send_event("initialized", None)?;
+                                }
+                            } else if msg_type == "response" {
+                                let cmd = msg.get("command").and_then(Value::as_str).unwrap_or("");
+                                if cmd == "attach" {
+                                    got_attach_resp = true;
+                                    if msg.get("success").and_then(Value::as_bool).unwrap_or(false) {
+                                        attached = true;
+                                    } else {
+                                        last_err = msg
+                                            .get("message")
+                                            .and_then(Value::as_str)
+                                            .unwrap_or("Attach failed")
+                                            .to_string();
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                        if attached || got_attach_resp {
+                            if attached {
+                                dap_log(&format!(
+                                    "Attached to JDWP port {port} on attempt {}",
+                                    attempt + 1
+                                ));
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if !attached {
+                    let err_msg = format!("Failed to attach JDTLS to JDWP port {port}: {last_err}");
+                    dap_log(&err_msg);
+                    self.send_response(req_seq, "launch", false, None, Some(&err_msg))?;
+                    return Ok(());
+                }
+
+                // Replay any buffered breakpoints
+                let pending = self.pending_breakpoints.lock().unwrap().drain(..).collect::<Vec<_>>();
+                if !pending.is_empty() {
+                    let mut jw_guard = self.jdtls_writer.lock().unwrap();
+                    if let Some(ref mut jw) = *jw_guard {
+                        for bp_req in pending {
+                            dap_log(&format!("Replaying buffered breakpoint: {:?}", bp_req));
+                            let _ = write_dap_message(jw, &bp_req);
+                        }
+                    }
+                }
+
+                // Spawn JDTLS forwarder thread
+                let jr_opt = self.jdtls_reader.lock().unwrap().take();
+                if let Some(mut jr) = jr_opt {
+                    let writer = self.writer.clone();
+                    let is_stopped = self.is_stopped.clone();
+                    let terminated = self.terminated.clone();
+                    let display_name_clone = display_name.clone();
+                    let seq = self.seq.clone();
+                    thread::spawn(move || {
+                        while let Ok(Some(mut val)) = read_dap_message(&mut jr) {
+                            if terminated.load(Ordering::SeqCst) {
+                                break;
+                            }
+                            dap_log(&format!("JDTLS -> {}", val));
+                            let msg_type = val.get("type").and_then(Value::as_str).unwrap_or("");
+                            if msg_type == "event" {
+                                let event = val.get("event").and_then(Value::as_str).unwrap_or("");
+                                if event == "stopped" {
+                                    is_stopped.store(true, Ordering::SeqCst);
+                                } else if event == "continued" {
+                                    is_stopped.store(false, Ordering::SeqCst);
+                                }
+                            } else if msg_type == "response" {
+                                let cmd = val.get("command").and_then(Value::as_str).unwrap_or("");
+                                if cmd == "threads" {
+                                    if let Some(threads) = val
+                                        .get_mut("body")
+                                        .and_then(|b| b.get_mut("threads"))
+                                        .and_then(Value::as_array_mut)
+                                    {
+                                        for t in threads {
+                                            let name =
+                                                t.get("name").and_then(Value::as_str).unwrap_or("");
+                                            if name.contains("main") {
+                                                t["name"] =
+                                                    json!(format!("{display_name_clone}: main"));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            val["seq"] = json!(seq.fetch_add(1, Ordering::SeqCst));
+                            let mut w = writer.lock().unwrap();
+                            let _ = write_dap_message(&mut *w, &val);
+                        }
+                    });
+                }
+            }
+        }
+
+        // DAP process event
         self.send_event(
             "process",
             Some(json!({
@@ -513,19 +861,21 @@ impl<W: Write + Send + 'static> DapServer<W> {
                 "startMethod": "launch",
             })),
         )?;
-        self.send_event(
-            "thread",
-            Some(json!({
-                "reason": "started",
-                "threadId": 1,
-            })),
-        )?;
+        if !has_jdtls {
+            self.send_event(
+                "thread",
+                Some(json!({
+                    "reason": "started",
+                    "threadId": 1,
+                })),
+            )?;
+        }
         self.send_response(req_seq, "launch", true, None, None)?;
 
         // Pipe stdout
         if let Some(stdout) = stdout {
             let writer = self.writer.clone();
-            let seq = self.seq.fetch_add(0, Ordering::SeqCst);
+            let seq = self.seq.clone();
             thread::spawn(move || {
                 let reader = BufReader::new(stdout);
                 for line in reader.lines().flatten() {
@@ -533,7 +883,7 @@ impl<W: Write + Send + 'static> DapServer<W> {
                     let _ = write_dap_message(
                         &mut *w,
                         &json!({
-                            "seq": seq,
+                            "seq": seq.fetch_add(1, Ordering::SeqCst),
                             "type": "event",
                             "event": "output",
                             "body": {
@@ -549,7 +899,7 @@ impl<W: Write + Send + 'static> DapServer<W> {
         // Pipe stderr
         if let Some(stderr) = stderr {
             let writer = self.writer.clone();
-            let seq = self.seq.fetch_add(0, Ordering::SeqCst);
+            let seq = self.seq.clone();
             thread::spawn(move || {
                 let reader = BufReader::new(stderr);
                 for line in reader.lines().flatten() {
@@ -557,7 +907,7 @@ impl<W: Write + Send + 'static> DapServer<W> {
                     let _ = write_dap_message(
                         &mut *w,
                         &json!({
-                            "seq": seq,
+                            "seq": seq.fetch_add(1, Ordering::SeqCst),
                             "type": "event",
                             "event": "output",
                             "body": {
@@ -576,6 +926,7 @@ impl<W: Write + Send + 'static> DapServer<W> {
         let terminated = self.terminated.clone();
         let entry_id_arc = self.entry_id.clone();
         let root = self.root.clone();
+        let seq = self.seq.clone();
         thread::spawn(move || {
             loop {
                 thread::sleep(Duration::from_millis(500));
@@ -596,7 +947,7 @@ impl<W: Write + Send + 'static> DapServer<W> {
                             let _ = write_dap_message(
                                 &mut *w,
                                 &json!({
-                                    "seq": 0,
+                                    "seq": seq.fetch_add(1, Ordering::SeqCst),
                                     "type": "event",
                                     "event": "output",
                                     "body": {
@@ -608,7 +959,7 @@ impl<W: Write + Send + 'static> DapServer<W> {
                             let _ = write_dap_message(
                                 &mut *w,
                                 &json!({
-                                    "seq": 0,
+                                    "seq": seq.fetch_add(1, Ordering::SeqCst),
                                     "type": "event",
                                     "event": "exited",
                                     "body": {
@@ -619,7 +970,7 @@ impl<W: Write + Send + 'static> DapServer<W> {
                             let _ = write_dap_message(
                                 &mut *w,
                                 &json!({
-                                    "seq": 0,
+                                    "seq": seq.fetch_add(1, Ordering::SeqCst),
                                     "type": "event",
                                     "event": "terminated",
                                 }),
@@ -669,8 +1020,16 @@ mod tests {
             PathBuf::from("/nonexistent"),
         );
 
+        let dummy_threads_req = json!({
+            "seq": 1,
+            "type": "request",
+            "command": "threads"
+        });
+
         // Before launch: threads returns "main"
-        server.handle_request(1, "threads", &json!({})).unwrap();
+        server
+            .handle_request(1, "threads", &json!({}), &dummy_threads_req)
+            .unwrap();
         let msgs = output.lock().unwrap().clone();
         let mut cursor = Cursor::new(msgs);
         let resp = read_dap_message(&mut cursor).unwrap().unwrap();
@@ -679,7 +1038,9 @@ mod tests {
         // Manually set display name as done during launch
         *server.display_name.lock().unwrap() = Some("SystemApplication".to_string());
         output.lock().unwrap().clear();
-        server.handle_request(2, "threads", &json!({})).unwrap();
+        server
+            .handle_request(2, "threads", &json!({}), &dummy_threads_req)
+            .unwrap();
         let msgs = output.lock().unwrap().clone();
         let mut cursor = Cursor::new(msgs);
         let resp = read_dap_message(&mut cursor).unwrap().unwrap();
@@ -688,10 +1049,27 @@ mod tests {
         // For group session
         *server.display_name.lock().unwrap() = Some("Group: uis".to_string());
         output.lock().unwrap().clear();
-        server.handle_request(3, "threads", &json!({})).unwrap();
+        server
+            .handle_request(3, "threads", &json!({}), &dummy_threads_req)
+            .unwrap();
         let msgs = output.lock().unwrap().clone();
         let mut cursor = Cursor::new(msgs);
         let resp = read_dap_message(&mut cursor).unwrap().unwrap();
         assert_eq!(resp["body"]["threads"][0]["name"], "Group: uis");
+    }
+
+    #[test]
+    fn test_hex_decode_and_allocate_port() {
+        let path = "/Users/river/IdeaProjects/uis";
+        let hex: String = path
+            .as_bytes()
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect();
+        let decoded = hex_decode(&hex).expect("valid hex");
+        assert_eq!(String::from_utf8(decoded).unwrap(), path);
+
+        let port = allocate_free_port().expect("free port");
+        assert!(port > 1024);
     }
 }
