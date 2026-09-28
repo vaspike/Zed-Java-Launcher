@@ -129,7 +129,6 @@ pub fn generate(
             "projectName":options.debug_project_name.as_deref().unwrap_or(&entry.project_name),
             "cwd":cwd, "vmArgs":options.jvm_args(), "args":options.args.clone().unwrap_or_default(), "env":options.env,
             "console":"integratedTerminal", "stopOnEntry":false,
-            "build": {"command":command(&["prepare", &entry.id]), "cwd":root, "save":"all", "shell":{"with_arguments":{"program":"/bin/sh","args":["-c"]}}}
         });
         if let Some(home) = &options.java_home {
             debug["javaExec"] = json!(config::expand(root, home).join("bin/java"));
@@ -137,6 +136,7 @@ pub fn generate(
         // Plain Java projects need the javac output directory instead of JDTLS's classpath.
         if !root.join("pom.xml").exists() {
             debug["classPaths"] = json!([crate::runtime::state_dir(root)?.join("classes")]);
+            debug["build"] = json!({"command":command(&["prepare", &entry.id]), "cwd":root, "save":"all", "shell":{"with_arguments":{"program":"/bin/sh","args":["-c"]}}});
             debug.as_object_mut().unwrap().remove("projectName");
         }
         out.debug.push(debug);

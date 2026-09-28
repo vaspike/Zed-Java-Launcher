@@ -93,6 +93,13 @@ pub fn build(
     if maven_project {
         let program = maven(root);
         let mut base = vec!["-B".into()];
+        if !options
+            .maven_args
+            .as_ref()
+            .map_or(false, |args| args.iter().any(|a| a.contains("antrun.skip")))
+        {
+            base.push("-Dmaven.antrun.skip=true".into());
+        }
         if let Some(extra) = &options.maven_args {
             base.extend(extra.iter().cloned());
         }
@@ -112,13 +119,13 @@ pub fn build(
             if entry.module != "." {
                 args.push("-am".into());
             }
-            args.extend(["install".into(), "-DskipTests".into()]);
+            args.extend(["test-compile".into(), "-DskipTests".into()]);
             plan.prepare.push(CommandSpec {
                 program: program.clone(),
                 args,
                 cwd: root.clone(),
             });
-            plan.notes.push("Maven install builds the selected module and upstream dependencies and writes to the local Maven repository; project build plugins WILL execute".into());
+            plan.notes.push("Maven test-compile builds the selected module and upstream dependencies; package phase plugins are not executed".into());
         }
         if entry.kind.is_test() {
             let selector = if let Some(method) = &entry.method {
