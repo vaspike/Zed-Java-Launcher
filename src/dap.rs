@@ -9,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering},
         Arc, Mutex,
     },
     thread,
@@ -191,6 +191,7 @@ pub struct DapServer<W: Write> {
     jdtls_reader: Arc<Mutex<Option<BufReader<TcpStream>>>>,
     jdtls_seq: Arc<AtomicU64>,
     pending_breakpoints: Arc<Mutex<Vec<Value>>>,
+    last_stopped_thread_id: Arc<AtomicI64>,
 }
 
 impl<W: Write + Send + 'static> DapServer<W> {
@@ -211,6 +212,7 @@ impl<W: Write + Send + 'static> DapServer<W> {
             jdtls_reader: Arc::new(Mutex::new(None)),
             jdtls_seq: Arc::new(AtomicU64::new(1000)),
             pending_breakpoints: Arc::new(Mutex::new(Vec::new())),
+            last_stopped_thread_id: Arc::new(AtomicI64::new(0)),
         }
     }
 
@@ -386,9 +388,10 @@ impl<W: Write + Send + 'static> DapServer<W> {
                         .unwrap()
                         .clone()
                         .unwrap_or_else(|| "main".to_string());
+                    let tid = self.last_stopped_thread_id.load(Ordering::SeqCst);
                     let body = json!({
                         "threads": [
-                            { "id": 1, "name": name }
+                            { "id": if tid > 0 { tid } else { 1 }, "name": name }
                         ]
                     });
                     self.send_response(req_seq, command, true, Some(body), None)?;
@@ -872,6 +875,7 @@ impl<W: Write + Send + 'static> DapServer<W> {
                     let is_stopped = self.is_stopped.clone();
                     let terminated = self.terminated.clone();
                     let display_name_clone = display_name.clone();
+                    let last_stopped_thread_id = self.last_stopped_thread_id.clone();
                     let seq = self.seq.clone();
                     thread::spawn(move || {
                         while let Ok(Some(mut val)) = read_dap_message(&mut jr) {
@@ -884,26 +888,49 @@ impl<W: Write + Send + 'static> DapServer<W> {
                                 let event = val.get("event").and_then(Value::as_str).unwrap_or("");
                                 if event == "stopped" {
                                     is_stopped.store(true, Ordering::SeqCst);
+                                    if let Some(tid) = val
+                                        .get("body")
+                                        .and_then(|b| b.get("threadId"))
+                                        .and_then(Value::as_i64)
+                                    {
+                                        last_stopped_thread_id.store(tid, Ordering::SeqCst);
+                                    }
                                 } else if event == "continued" {
                                     is_stopped.store(false, Ordering::SeqCst);
+                                } else if event == "thread" {
+                                    // Suppress internal JVM daemon/worker thread lifecycle events from JDTLS
+                                    // so Zed doesn't accumulate 40+ threads in its session thread map.
+                                    // A thread map with length > 1 breaks Zed's single-thread session naming fallback,
+                                    // causing Zed to display "(child)".
+                                    continue;
                                 }
                             } else if msg_type == "response" {
                                 let cmd = val.get("command").and_then(Value::as_str).unwrap_or("");
                                 if cmd == "threads" {
-                                    if let Some(threads) = val
-                                        .get_mut("body")
-                                        .and_then(|b| b.get_mut("threads"))
-                                        .and_then(Value::as_array_mut)
-                                    {
-                                        for t in threads {
-                                            let name =
-                                                t.get("name").and_then(Value::as_str).unwrap_or("");
-                                            if name.contains("main") {
-                                                t["name"] =
-                                                    json!(format!("{display_name_clone}: main"));
+                                    let stopped_tid = last_stopped_thread_id.load(Ordering::SeqCst);
+                                    let final_tid = if stopped_tid > 0 {
+                                        stopped_tid
+                                    } else {
+                                        val.get("body")
+                                            .and_then(|b| b.get("threads"))
+                                            .and_then(Value::as_array)
+                                            .and_then(|arr| arr.first())
+                                            .and_then(|t| t.get("id"))
+                                            .and_then(Value::as_i64)
+                                            .unwrap_or(1)
+                                    };
+                                    // Return ONLY the stopped/active thread, with its name set to the service display name.
+                                    // Because threads.len() == 1, Zed uses threads[0].name as the session name,
+                                    // ensuring the session displays its service name (e.g. "SystemApplication")
+                                    // instead of falling back to "(child)".
+                                    val["body"] = json!({
+                                        "threads": [
+                                            {
+                                                "id": final_tid,
+                                                "name": display_name_clone
                                             }
-                                        }
-                                    }
+                                        ]
+                                    });
                                 }
                             }
                             val["seq"] = json!(seq.fetch_add(1, Ordering::SeqCst));
@@ -1179,6 +1206,21 @@ mod tests {
         let mut cursor = Cursor::new(msgs);
         let resp = read_dap_message(&mut cursor).unwrap().unwrap();
         assert_eq!(resp["body"]["threads"][0]["name"], "Group: uis");
+
+        // When a breakpoint hits on thread 141 in SystemApplication:
+        *server.display_name.lock().unwrap() = Some("SystemApplication".to_string());
+        server.last_stopped_thread_id.store(141, Ordering::SeqCst);
+        output.lock().unwrap().clear();
+        server
+            .handle_request(4, "threads", &json!({}), &dummy_threads_req)
+            .unwrap();
+        let msgs = output.lock().unwrap().clone();
+        let mut cursor = Cursor::new(msgs);
+        let resp = read_dap_message(&mut cursor).unwrap().unwrap();
+        let threads = resp["body"]["threads"].as_array().unwrap();
+        assert_eq!(threads.len(), 1);
+        assert_eq!(threads[0]["id"], 141);
+        assert_eq!(threads[0]["name"], "SystemApplication");
     }
 
     #[test]
