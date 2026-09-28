@@ -186,6 +186,7 @@ pub struct DapServer<W: Write> {
     display_name: Arc<Mutex<Option<String>>>,
     terminated: Arc<AtomicBool>,
     is_stopped: Arc<AtomicBool>,
+    initialized_sent: Arc<AtomicBool>,
     jdtls_writer: Arc<Mutex<Option<TcpStream>>>,
     jdtls_reader: Arc<Mutex<Option<BufReader<TcpStream>>>>,
     jdtls_seq: Arc<AtomicU64>,
@@ -205,6 +206,7 @@ impl<W: Write + Send + 'static> DapServer<W> {
             display_name: Arc::new(Mutex::new(None)),
             terminated: Arc::new(AtomicBool::new(false)),
             is_stopped: Arc::new(AtomicBool::new(false)),
+            initialized_sent: Arc::new(AtomicBool::new(false)),
             jdtls_writer: Arc::new(Mutex::new(None)),
             jdtls_reader: Arc::new(Mutex::new(None)),
             jdtls_seq: Arc::new(AtomicU64::new(1000)),
@@ -325,6 +327,10 @@ impl<W: Write + Send + 'static> DapServer<W> {
                                         {
                                             resp["request_seq"] = json!(req_seq);
                                             resp["seq"] = json!(self.next_seq());
+                                            if let Some(body) = resp.get_mut("body").and_then(Value::as_object_mut) {
+                                                body.insert("supportsTerminateRequest".to_string(), json!(true));
+                                                body.insert("supportsTerminateThreadsRequest".to_string(), json!(true));
+                                            }
                                             let _ = self.send(&resp);
                                             *self.jdtls_writer.lock().unwrap() =
                                                 Some(jdtls_w);
@@ -354,10 +360,13 @@ impl<W: Write + Send + 'static> DapServer<W> {
                     let body = json!({
                         "supportsConfigurationDoneRequest": true,
                         "supportsTerminateRequest": true,
+                        "supportsTerminateThreadsRequest": true,
                         "supportsRestartRequest": true,
                     });
                     self.send_response(req_seq, command, true, Some(body), None)?;
-                    self.send_event("initialized", None)?;
+                    if !self.initialized_sent.swap(true, Ordering::SeqCst) {
+                        self.send_event("initialized", None)?;
+                    }
                 }
             }
             "launch" => {
@@ -385,11 +394,21 @@ impl<W: Write + Send + 'static> DapServer<W> {
                     self.send_response(req_seq, command, true, Some(body), None)?;
                 }
             }
-            "disconnect" | "terminate" => {
-                dap_log("Handling disconnect/terminate");
+            "disconnect" | "terminate" | "terminateThreads" => {
+                dap_log(&format!("Handling {command}"));
                 self.terminated.store(true, Ordering::SeqCst);
                 if let Some(mut jw) = self.jdtls_writer.lock().unwrap().take() {
-                    let _ = write_dap_message(&mut jw, raw_msg);
+                    let jdtls_msg = if command == "terminateThreads" {
+                        json!({
+                            "seq": self.jdtls_seq.fetch_add(1, Ordering::SeqCst),
+                            "type": "request",
+                            "command": "disconnect",
+                            "arguments": { "restart": false }
+                        })
+                    } else {
+                        raw_msg.clone()
+                    };
+                    let _ = write_dap_message(&mut jw, &jdtls_msg);
                 }
                 if let Some(mut child) = self.child.lock().unwrap().take() {
                     let pid = child.id() as i32;
@@ -422,6 +441,7 @@ impl<W: Write + Send + 'static> DapServer<W> {
                     }
                 }
                 self.send_response(req_seq, command, true, None, None)?;
+                self.send_event("exited", Some(json!({ "exitCode": 0 })))?;
                 self.send_event("terminated", None)?;
                 return Ok(true);
             }
@@ -450,7 +470,13 @@ impl<W: Write + Send + 'static> DapServer<W> {
                     }
                 } else {
                     match command {
-                        "configurationDone" | "setExceptionBreakpoints" => {
+                        "configurationDone"
+                        | "setExceptionBreakpoints"
+                        | "pause"
+                        | "continue"
+                        | "next"
+                        | "stepIn"
+                        | "stepOut" => {
                             self.send_response(req_seq, command, true, None, None)?;
                         }
                         "stackTrace" => {
@@ -491,6 +517,10 @@ impl<W: Write + Send + 'static> DapServer<W> {
         let _ = self.jdtls_writer.lock().unwrap().take();
         let _ = self.jdtls_reader.lock().unwrap().take();
 
+        if !self.initialized_sent.swap(true, Ordering::SeqCst) {
+            self.send_event("initialized", None)?;
+        }
+
         *self.display_name.lock().unwrap() = Some(format!("Group: {group_name}"));
         let mut config = config::load(&self.config_path).unwrap_or_default();
         if config.groups.is_empty() {
@@ -526,6 +556,8 @@ impl<W: Write + Send + 'static> DapServer<W> {
             ),
         )?;
 
+        let leader_pid = std::process::id();
+
         // Send DAP reverse request `startDebugging` for each enabled service
         for item in &enabled {
             let child_seq = self.next_seq();
@@ -548,7 +580,8 @@ impl<W: Write + Send + 'static> DapServer<W> {
                         "request": "launch",
                         "label": label,
                         "entry": item.entry,
-                        "skipBuild": true
+                        "skipBuild": true,
+                        "groupLeaderPid": leader_pid
                     }
                 }
             });
@@ -574,6 +607,30 @@ impl<W: Write + Send + 'static> DapServer<W> {
                 enabled.len()
             ),
         )?;
+
+        // Send DAP `process` and `thread` events so Zed recognizes an active process/thread,
+        // which activates the "Terminate All Threads" / Stop button in Zed's debug panel.
+        self.send(&json!({
+            "seq": self.next_seq(),
+            "type": "event",
+            "event": "process",
+            "body": {
+                "name": format!("Group: {group_name}"),
+                "systemProcessId": leader_pid,
+                "isLocalProcess": true,
+                "startMethod": "launch"
+            }
+        }))?;
+        self.send(&json!({
+            "seq": self.next_seq(),
+            "type": "event",
+            "event": "thread",
+            "body": {
+                "reason": "started",
+                "threadId": 1
+            }
+        }))?;
+
         Ok(())
     }
 
@@ -614,6 +671,11 @@ impl<W: Write + Send + 'static> DapServer<W> {
         if skip_build {
             options.build = Some(false);
         }
+
+        let group_leader_pid = args
+            .get("groupLeaderPid")
+            .and_then(Value::as_i64)
+            .or_else(|| args.get("groupLeaderPid").and_then(Value::as_u64).map(|v| v as i64));
 
         let has_jdtls = self.jdtls_writer.lock().unwrap().is_some();
         let jdwp_port = if has_jdtls {
@@ -751,7 +813,9 @@ impl<W: Write + Send + 'static> DapServer<W> {
                             if msg_type == "event" {
                                 let event = msg.get("event").and_then(Value::as_str).unwrap_or("");
                                 if event == "initialized" {
-                                    self.send_event("initialized", None)?;
+                                    if !self.initialized_sent.swap(true, Ordering::SeqCst) {
+                                        self.send_event("initialized", None)?;
+                                    }
                                 }
                             } else if msg_type == "response" {
                                 let cmd = msg.get("command").and_then(Value::as_str).unwrap_or("");
@@ -920,7 +984,7 @@ impl<W: Write + Send + 'static> DapServer<W> {
             });
         }
 
-        // Wait thread
+        // Wait thread & Watchdog
         let child_arc = self.child.clone();
         let writer = self.writer.clone();
         let terminated = self.terminated.clone();
@@ -929,10 +993,69 @@ impl<W: Write + Send + 'static> DapServer<W> {
         let seq = self.seq.clone();
         thread::spawn(move || {
             loop {
-                thread::sleep(Duration::from_millis(500));
+                thread::sleep(Duration::from_millis(300));
                 if terminated.load(Ordering::SeqCst) {
                     break;
                 }
+
+                // If this child session was spawned by a group orchestrator, monitor parent's liveness
+                if let Some(leader_pid) = group_leader_pid {
+                    let alive = unsafe { libc::kill(leader_pid as i32, 0) == 0 };
+                    if !alive {
+                        dap_log(&format!(
+                            "Group leader PID {leader_pid} exited; terminating child session"
+                        ));
+                        terminated.store(true, Ordering::SeqCst);
+                        let mut guard = child_arc.lock().unwrap();
+                        if let Some(mut child) = guard.take() {
+                            let pid = child.id() as i32;
+                            unsafe {
+                                libc::kill(-pid, libc::SIGTERM);
+                            }
+                            let _ = child.kill();
+                            dap_log(&format!("Watchdog killed child JVM PID {pid}"));
+                        }
+                        if let Some(ref id) = *entry_id_arc.lock().unwrap() {
+                            if let Ok(dir) = runtime::state_dir(&root) {
+                                let _ = std::fs::remove_file(dir.join(format!("{}.pid", runtime::hash(id))));
+                            }
+                        }
+                        let mut w = writer.lock().unwrap();
+                        let _ = write_dap_message(
+                            &mut *w,
+                            &json!({
+                                "seq": seq.fetch_add(1, Ordering::SeqCst),
+                                "type": "event",
+                                "event": "output",
+                                "body": {
+                                    "category": "stdout",
+                                    "output": "[Java Launcher] Group orchestrator ended; shutting down.\n",
+                                }
+                            }),
+                        );
+                        let _ = write_dap_message(
+                            &mut *w,
+                            &json!({
+                                "seq": seq.fetch_add(1, Ordering::SeqCst),
+                                "type": "event",
+                                "event": "exited",
+                                "body": {
+                                    "exitCode": 0,
+                                }
+                            }),
+                        );
+                        let _ = write_dap_message(
+                            &mut *w,
+                            &json!({
+                                "seq": seq.fetch_add(1, Ordering::SeqCst),
+                                "type": "event",
+                                "event": "terminated",
+                            }),
+                        );
+                        break;
+                    }
+                }
+
                 let mut guard = child_arc.lock().unwrap();
                 if let Some(ref mut child) = *guard {
                     match child.try_wait() {
@@ -1071,5 +1194,59 @@ mod tests {
 
         let port = allocate_free_port().expect("free port");
         assert!(port > 1024);
+    }
+
+    #[test]
+    fn test_terminate_threads_request_handling() {
+        #[derive(Clone)]
+        struct SharedWriter(Arc<Mutex<Vec<u8>>>);
+        impl Write for SharedWriter {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().write(buf)
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                self.0.lock().unwrap().flush()
+            }
+        }
+
+        let output = Arc::new(Mutex::new(Vec::new()));
+        let writer = SharedWriter(output.clone());
+        let server = DapServer::new(
+            writer,
+            PathBuf::from("/nonexistent"),
+            PathBuf::from("/nonexistent"),
+        );
+
+        let term_req = json!({
+            "seq": 10,
+            "type": "request",
+            "command": "terminateThreads",
+            "arguments": {
+                "threadIds": [1]
+            }
+        });
+
+        let should_break = server
+            .handle_request(10, "terminateThreads", &term_req["arguments"], &term_req)
+            .unwrap();
+        assert!(should_break);
+        assert!(server.terminated.load(Ordering::SeqCst));
+
+        let msgs = output.lock().unwrap().clone();
+        let mut cursor = Cursor::new(msgs);
+
+        // 1. Response for terminateThreads
+        let resp = read_dap_message(&mut cursor).unwrap().unwrap();
+        assert_eq!(resp["command"], "terminateThreads");
+        assert_eq!(resp["success"], true);
+
+        // 2. Event exited
+        let exited = read_dap_message(&mut cursor).unwrap().unwrap();
+        assert_eq!(exited["event"], "exited");
+        assert_eq!(exited["body"]["exitCode"], 0);
+
+        // 3. Event terminated
+        let term = read_dap_message(&mut cursor).unwrap().unwrap();
+        assert_eq!(term["event"], "terminated");
     }
 }
