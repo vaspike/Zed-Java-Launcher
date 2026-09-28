@@ -55,8 +55,6 @@ pub fn generate(
     if include_tests {
         refresh_args.push("--include-tests");
     }
-    out.tasks
-        .push(task(&format!("{PREFIX} Open"), command(&["ui"]), root));
     out.tasks.push(task(
         &format!("{PREFIX} Refresh configurations"),
         command(&refresh_args),
@@ -147,6 +145,12 @@ pub fn generate(
                 .entry(&item.entry)
                 .with_context(|| format!("Invalid group {name}"))?;
         }
+        out.debug.push(json!({
+            "label": format!("{PREFIX} 🚀 Group: {name}"),
+            "adapter": "java-launcher",
+            "request": "launch",
+            "group": name,
+        }));
         out.tasks.push(task(
             &format!("{PREFIX} Group up {name}"),
             command(&["group", "up", name]),

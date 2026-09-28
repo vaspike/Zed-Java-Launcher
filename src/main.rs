@@ -1,10 +1,10 @@
 #![cfg(unix)]
 mod config;
+mod dap;
 mod model;
 mod plan;
 mod runtime;
 mod scan;
-mod tui;
 mod zed;
 
 use anyhow::{bail, Context, Result};
@@ -16,7 +16,7 @@ use std::{path::PathBuf, thread, time::Duration};
 #[command(
     name = "java-launcher",
     version,
-    about = "Java launch management for Zed (macOS-first preview)"
+    about = "Java launch management and DAP orchestrator for Zed"
 )]
 struct Cli {
     #[arg(long, global = true, default_value = ".")]
@@ -24,7 +24,7 @@ struct Cli {
     #[arg(long, global = true)]
     config: Option<PathBuf>,
     #[command(subcommand)]
-    command: Action,
+    command: Option<Action>,
 }
 #[derive(Args)]
 struct RunArgs {
@@ -112,8 +112,8 @@ enum Action {
         #[arg(short = 'o', long)]
         zed: bool,
     },
-    /// Interactive terminal UI for search, run, stop, logs, profiles, and groups.
-    Ui,
+    /// Run Debug Adapter Protocol (DAP) server for Zed integration.
+    Dap,
     /// Start/stop a named group. Delays sequence launch requests, not health checks.
     Group {
         #[arg(value_enum)]
@@ -159,7 +159,13 @@ fn execute() -> Result<()> {
             }
         })
         .unwrap_or_else(|| root.join(".java-launcher/config.json"));
-    if matches!(cli.command, Action::Doctor) {
+    let command = cli.command.unwrap_or(Action::Dap);
+    if matches!(command, Action::Dap) {
+        let stdin = std::io::stdin();
+        let server = dap::DapServer::new(std::io::stdout(), root, config_path);
+        return server.run(stdin.lock());
+    }
+    if matches!(command, Action::Doctor) {
         for (name, args) in [
             ("zed", vec!["--version"]),
             ("java", vec!["-version"]),
@@ -187,20 +193,15 @@ fn execute() -> Result<()> {
         println!("Requires Zed Java extension. JDTLS needs its own compatible JDK (usually 21+); project JDK is independently configured via defaults.java_home.");
         return Ok(());
     }
-    if matches!(cli.command, Action::Ps) {
+    if matches!(command, Action::Ps) {
         return print_json(&runtime::statuses(&root)?);
-    }
-    if matches!(cli.command, Action::Ui) {
-        let project = scan::scan(&root)?;
-        let config = config::load(&config_path)?;
-        return tui::open(&root, &config_path, &project, &config);
     }
     if let Action::Logs {
         entry,
         follow,
         lines,
         zed,
-    } = &cli.command
+    } = &command
     {
         let id = if runtime::request(&root, entry, "status").is_ok() {
             entry.clone()
@@ -232,7 +233,7 @@ fn execute() -> Result<()> {
         }
         return Ok(());
     }
-    if let Action::Stop { entry, all } = &cli.command {
+    if let Action::Stop { entry, all } = &command {
         if *all {
             for s in runtime::statuses(&root)? {
                 runtime::stop(&root, &s.entry)?;
@@ -256,7 +257,7 @@ fn execute() -> Result<()> {
         action: GroupAction::Down,
         name,
         ..
-    } = &cli.command
+    } = &command
     {
         let items = config
             .groups
@@ -272,7 +273,7 @@ fn execute() -> Result<()> {
     }
     let project = scan::scan(&root)?;
     warn(&project.warnings);
-    match cli.command {
+    match command {
         Action::Scan {
             json,
             spring_only,
@@ -348,12 +349,12 @@ fn execute() -> Result<()> {
                 options.build = Some(false);
             }
             let plan = plan::build(&project, entry, &options, args.debug_port, args.suspend)?;
-            match &cli.command {
+            match &command {
                 Action::Plan(_) => print_json(&plan)?,
                 Action::Start(_) | Action::Restart(_) => {
                     // Validate environment before spawning, without logging its values.
                     config::environment(&root, &options)?;
-                    if matches!(cli.command, Action::Restart(_))
+                    if matches!(command, Action::Restart(_))
                         && runtime::request(&root, &entry.id, "status").is_ok()
                     {
                         runtime::stop(&root, &entry.id)?;

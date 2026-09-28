@@ -2,13 +2,16 @@ id = "zed-java-launcher"
 name = "Java Launcher"
 version = "0.1.0"
 schema_version = 1
-description = "Fast Java & Spring Boot multi-module launcher, supervisor and TUI for Zed."
+description = "Fast Java & Spring Boot multi-module launcher and DAP group orchestrator for Zed."
 repository = "https://github.com/river/zed-java-launcher"
 authors = ["River <vaspike@outlook.com>"]
 
 [lib]
 kind = "Rust"
 version = "0.7.0"
+
+[debug_adapters.java-launcher]
+schema_path = "debug_adapter_schemas/java-launcher.json"
 
 [slash_commands.launcher]
 description = "Quick guide and actions for Java Launcher"

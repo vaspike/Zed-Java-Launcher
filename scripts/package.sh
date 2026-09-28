@@ -47,6 +47,7 @@ cp -f "${ROOT_DIR}/extension.toml" "${STAGE_DIR}/extension.toml"
 cp -f "${WASM_PATH}" "${STAGE_DIR}/extension.wasm"
 cp -f "${ROOT_DIR}/zed-extension/Cargo.toml" "${STAGE_DIR}/Cargo.toml"
 cp -f "${ROOT_DIR}/zed-extension/src/lib.rs" "${STAGE_DIR}/src/lib.rs"
+cp -r "${ROOT_DIR}/debug_adapter_schemas" "${STAGE_DIR}/debug_adapter_schemas"
 
 # Copy native CLI binary
 cp -f "${BIN_PATH}" "${STAGE_DIR}/bin/java-launcher"
