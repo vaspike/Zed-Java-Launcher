@@ -107,6 +107,16 @@ fn import_and_sync_preserve_profile_and_user_configs() {
         .unwrap()
         .iter()
         .any(|v| v["vmArgs"] == json!(["-Xmx512m", "-Dspring.profiles.active=test"])));
+    assert!(ts
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v["label"] == "[Java Launcher] Open"));
+    assert!(!ts
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v["label"].as_str().unwrap_or("").contains("Run api")));
     assert!(f.root().join(".zed/.java-launcher-backups").exists());
 }
 

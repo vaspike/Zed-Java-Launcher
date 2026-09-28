@@ -55,6 +55,8 @@ pub fn generate(
     if include_tests {
         refresh_args.push("--include-tests");
     }
+    out.tasks
+        .push(task(&format!("{PREFIX} Open"), command(&["ui"]), root));
     out.tasks.push(task(
         &format!("{PREFIX} Refresh configurations"),
         command(&refresh_args),
@@ -87,27 +89,31 @@ pub fn generate(
                 .map(|m| format!("#{m}"))
                 .unwrap_or_default()
         );
-        out.tasks.push(task(
-            &format!(
-                "{PREFIX} {} {label}",
-                if entry.kind.is_test() { "Test" } else { "Run" }
-            ),
-            command(&["run", &entry.id]),
-            root,
-        ));
+        if include_main || include_tests {
+            out.tasks.push(task(
+                &format!(
+                    "{PREFIX} {} {label}",
+                    if entry.kind.is_test() { "Test" } else { "Run" }
+                ),
+                command(&["run", &entry.id]),
+                root,
+            ));
+            if !entry.kind.is_test() {
+                out.tasks.push(task(
+                    &format!("{PREFIX} Stop {label}"),
+                    command(&["stop", &entry.id]),
+                    root,
+                ));
+                out.tasks.push(task(
+                    &format!("{PREFIX} Restart {label}"),
+                    command(&["restart", &entry.id]),
+                    root,
+                ));
+            }
+        }
         if entry.kind.is_test() {
             continue;
         }
-        out.tasks.push(task(
-            &format!("{PREFIX} Stop {label}"),
-            command(&["stop", &entry.id]),
-            root,
-        ));
-        out.tasks.push(task(
-            &format!("{PREFIX} Restart {label}"),
-            command(&["restart", &entry.id]),
-            root,
-        ));
         let options = config.options(&entry.id);
         if options.env_file.is_some() {
             out.warnings.push(format!("{}: native launch debug omitted because env_file is configured. Use `start --debug-port PORT --suspend` and an attach scenario; no secrets are copied to debug.json", entry.id));

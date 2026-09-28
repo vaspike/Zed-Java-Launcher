@@ -4,6 +4,7 @@ mod model;
 mod plan;
 mod runtime;
 mod scan;
+mod tui;
 mod zed;
 
 use anyhow::{bail, Context, Result};
@@ -94,6 +95,8 @@ enum Action {
     Restart(RunArgs),
     /// Persist the Spring profile without changing other launch options.
     Profile { entry: String, profile: String },
+    /// Interactive terminal UI for search, run, stop, logs, profiles, and groups.
+    Ui,
     /// Start/stop a named group. Delays sequence launch requests, not health checks.
     Group {
         #[arg(value_enum)]
@@ -169,6 +172,11 @@ fn execute() -> Result<()> {
     }
     if matches!(cli.command, Action::Ps) {
         return print_json(&runtime::statuses(&root)?);
+    }
+    if matches!(cli.command, Action::Ui) {
+        let project = scan::scan(&root)?;
+        let config = config::load(&config_path)?;
+        return tui::open(&root, &config_path, &project, &config);
     }
     if let Action::Stop { entry, all } = &cli.command {
         if *all {

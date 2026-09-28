@@ -29,6 +29,27 @@ It is currently a native CLI that generates Zed `tasks.json` / `debug.json` and 
 - Test debugging is not implemented.
 - CLI-managed processes and Zed-native debug sessions are separate lifecycles.
 
+## TUI
+
+```bash
+java-launcher --project /path/to/project ui
+```
+
+In Zed, run the generated task `[Java Launcher] Open`. It opens the same TUI inside Zed's terminal.
+
+Keys:
+
+- `r` run selected application
+- `s` stop selected application
+- `R` restart selected application
+- `l` show current log path
+- `p` set Spring profile
+- `g` / `G` group up / group down
+- type to filter, `Backspace` edits the filter, `/` clears it
+- `q` quit
+
+By default `sync-zed` generates the Open task, group tasks, process tasks, and debug configs. Per-entry run/stop/restart tasks are only generated with `--include-main` or `--include-tests`.
+
 ## Commands
 
 ```bash
