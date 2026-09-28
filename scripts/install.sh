@@ -3,7 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_SRC="${SCRIPT_DIR}/bin/java-launcher"
-EXT_SRC="${SCRIPT_DIR}/extension"
+EXT_TOML="${SCRIPT_DIR}/extension.toml"
+EXT_WASM="${SCRIPT_DIR}/extension.wasm"
 
 echo "=========================================="
 echo "    Zed Java Launcher Installer"
@@ -14,8 +15,8 @@ if [[ ! -f "${BIN_SRC}" ]]; then
     exit 1
 fi
 
-if [[ ! -d "${EXT_SRC}" ]]; then
-    echo "❌ Error: Missing extension directory at ${EXT_SRC}" >&2
+if [[ ! -f "${EXT_TOML}" ]]; then
+    echo "❌ Error: Missing extension manifest at ${EXT_TOML}" >&2
     exit 1
 fi
 
@@ -35,12 +36,18 @@ if [[ ":$PATH:" != *":${INSTALL_BIN_DIR}:"* ]]; then
     echo ""
 fi
 
-# 2. Install Zed extension into Zed extensions directory
-ZED_EXT_DIR="${HOME}/Library/Application Support/Zed/extensions/installed/java-launcher"
+# 2. Install Zed extension directly into Zed's extensions directory
+ZED_EXT_DIR="${HOME}/Library/Application Support/Zed/extensions/installed/zed-java-launcher"
 echo "-> [2/2] Installing Zed extension to:"
 echo "   ${ZED_EXT_DIR}..."
 mkdir -p "${ZED_EXT_DIR}"
-cp -rf "${EXT_SRC}"/* "${ZED_EXT_DIR}/"
+cp -f "${EXT_TOML}" "${ZED_EXT_DIR}/extension.toml"
+if [[ -f "${EXT_WASM}" ]]; then
+    cp -f "${EXT_WASM}" "${ZED_EXT_DIR}/extension.wasm"
+fi
+if [[ -f "${SCRIPT_DIR}/README.md" ]]; then
+    cp -f "${SCRIPT_DIR}/README.md" "${ZED_EXT_DIR}/README.md"
+fi
 
 echo ""
 echo "=========================================="
@@ -48,10 +55,10 @@ echo "  ✅ Installation completed successfully!"
 echo "=========================================="
 echo ""
 echo "Quick Start:"
-echo "1. Verify installation in Zed:"
-echo "   Press Cmd+Shift+P -> search 'zed: extensions' -> find 'Java Launcher'."
+echo "1. Verify in Zed:"
+echo "   Open Zed -> Cmd+Shift+P -> search 'zed: extensions' -> confirm 'Java Launcher' is listed."
 echo ""
-echo "2. Initialize your Java project:"
+echo "2. Initialize your Java workspace:"
 echo "   cd /path/to/your/java/project"
 echo "   ${INSTALL_BIN_DIR}/java-launcher sync-zed --write"
 echo ""

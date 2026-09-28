@@ -1,4 +1,5 @@
 /target/
 /artifacts/
 /dist/
+zed-extension/target/
 .DS_Store

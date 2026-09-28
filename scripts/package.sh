@@ -11,12 +11,12 @@ OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 PACKAGE_NAME="zed-java-launcher-v${VERSION}-${OS}-${ARCH}"
 
 echo "=========================================="
-echo "  Building and Packaging Zed Java Launcher"
+echo "  Building Standard Zed Extension Package"
 echo "  Version: ${VERSION}, Platform: ${OS}-${ARCH}"
 echo "=========================================="
 
-# 1. Build release binary
-echo "-> [1/4] Compiling release binary with cargo..."
+# 1. Build native CLI binary
+echo "-> [1/4] Compiling native CLI binary with cargo..."
 cd "${ROOT_DIR}"
 cargo build --release
 
@@ -26,19 +26,31 @@ if [[ ! -f "${BIN_PATH}" ]]; then
     exit 1
 fi
 
-# 2. Prepare staging directory
-echo "-> [2/4] Setting up distribution structure at ${STAGE_DIR}..."
+# 2. Build Zed WASM extension
+echo "-> [2/4] Compiling Zed WASM extension (wasm32-wasip2)..."
+cargo build --manifest-path "${ROOT_DIR}/zed-extension/Cargo.toml" --target wasm32-wasip2 --release
+
+WASM_PATH="${ROOT_DIR}/zed-extension/target/wasm32-wasip2/release/zed_java_launcher.wasm"
+if [[ ! -f "${WASM_PATH}" ]]; then
+    echo "❌ Error: WASM binary not found at ${WASM_PATH}" >&2
+    exit 1
+fi
+
+# 3. Prepare standard Zed extension directory
+echo "-> [3/4] Staging standard Zed extension at ${STAGE_DIR}..."
 rm -rf "${STAGE_DIR}"
 mkdir -p "${STAGE_DIR}/bin"
-mkdir -p "${STAGE_DIR}/extension"
+mkdir -p "${STAGE_DIR}/src"
 
-# Copy binary
+# Copy standard extension files to ROOT of package
+cp -f "${ROOT_DIR}/extension.toml" "${STAGE_DIR}/extension.toml"
+cp -f "${WASM_PATH}" "${STAGE_DIR}/extension.wasm"
+cp -f "${ROOT_DIR}/zed-extension/Cargo.toml" "${STAGE_DIR}/Cargo.toml"
+cp -f "${ROOT_DIR}/zed-extension/src/lib.rs" "${STAGE_DIR}/src/lib.rs"
+
+# Copy native CLI binary
 cp -f "${BIN_PATH}" "${STAGE_DIR}/bin/java-launcher"
 chmod +x "${STAGE_DIR}/bin/java-launcher"
-
-# Copy extension files
-cp -f "${ROOT_DIR}/extension/extension.toml" "${STAGE_DIR}/extension/extension.toml"
-cp -f "${ROOT_DIR}/extension/README.md" "${STAGE_DIR}/extension/README.md"
 
 # Copy scripts & doc
 cp -f "${ROOT_DIR}/scripts/install.sh" "${STAGE_DIR}/install.sh"
@@ -46,8 +58,8 @@ cp -f "${ROOT_DIR}/scripts/uninstall.sh" "${STAGE_DIR}/uninstall.sh"
 cp -f "${ROOT_DIR}/scripts/dist-README.md" "${STAGE_DIR}/README.md"
 chmod +x "${STAGE_DIR}/install.sh" "${STAGE_DIR}/uninstall.sh"
 
-# 3. Create compressed archives
-echo "-> [3/4] Creating distribution archives..."
+# 4. Create compressed archives
+echo "-> [4/4] Creating distribution archives..."
 TAR_FILE="${DIST_DIR}/${PACKAGE_NAME}.tar.gz"
 ZIP_FILE="${DIST_DIR}/${PACKAGE_NAME}.zip"
 
@@ -57,12 +69,13 @@ rm -f "${TAR_FILE}" "${ZIP_FILE}"
 tar -czf "${TAR_FILE}" zed-java-launcher
 zip -r -q "${ZIP_FILE}" zed-java-launcher
 
-# 4. Summary
-echo "-> [4/4] Package built successfully!"
+echo ""
 echo "=========================================="
-echo "Generated distribution artifacts:"
+echo "  ✅ Standard package built successfully!"
+echo "=========================================="
+echo "Distribution files:"
 ls -lh "${DIST_DIR}/${PACKAGE_NAME}".*
 echo ""
-echo "Unpacked directory ready for inspection:"
+echo "Unpacked directory for Zed 'Install Dev Extension':"
 echo "  ${STAGE_DIR}"
 echo "=========================================="
