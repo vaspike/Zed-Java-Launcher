@@ -195,7 +195,7 @@ pub struct DapServer<W: Write> {
 }
 
 impl<W: Write + Send + 'static> DapServer<W> {
-    pub fn new(writer: W, root: PathBuf, config_path: PathBuf) -> Self {
+    pub fn new(writer: W, root: PathBuf, config_path: PathBuf, initial_name: Option<String>) -> Self {
         Self {
             writer: Arc::new(Mutex::new(writer)),
             seq: Arc::new(AtomicU64::new(1)),
@@ -204,7 +204,7 @@ impl<W: Write + Send + 'static> DapServer<W> {
             child: Arc::new(Mutex::new(None)),
             group_members: Arc::new(Mutex::new(Vec::new())),
             entry_id: Arc::new(Mutex::new(None)),
-            display_name: Arc::new(Mutex::new(None)),
+            display_name: Arc::new(Mutex::new(initial_name)),
             terminated: Arc::new(AtomicBool::new(false)),
             is_stopped: Arc::new(AtomicBool::new(false)),
             initialized_sent: Arc::new(AtomicBool::new(false)),
@@ -952,15 +952,13 @@ impl<W: Write + Send + 'static> DapServer<W> {
                 "startMethod": "launch",
             })),
         )?;
-        if !has_jdtls {
-            self.send_event(
-                "thread",
-                Some(json!({
-                    "reason": "started",
-                    "threadId": 1,
-                })),
-            )?;
-        }
+        self.send_event(
+            "thread",
+            Some(json!({
+                "reason": "started",
+                "threadId": 1,
+            })),
+        )?;
         self.send_response(req_seq, "launch", true, None, None)?;
 
         // Pipe stdout
@@ -1168,6 +1166,7 @@ mod tests {
             writer,
             PathBuf::from("/nonexistent"),
             PathBuf::from("/nonexistent"),
+            None,
         );
 
         let dummy_threads_req = json!({
@@ -1176,7 +1175,7 @@ mod tests {
             "command": "threads"
         });
 
-        // Before launch: threads returns "main"
+        // Before launch without initial_name: threads returns "main"
         server
             .handle_request(1, "threads", &json!({}), &dummy_threads_req)
             .unwrap();
@@ -1184,6 +1183,23 @@ mod tests {
         let mut cursor = Cursor::new(msgs);
         let resp = read_dap_message(&mut cursor).unwrap().unwrap();
         assert_eq!(resp["body"]["threads"][0]["name"], "main");
+
+        // When initialized with initial_name (e.g. from CLI --name passed by extension)
+        let output2 = Arc::new(Mutex::new(Vec::new()));
+        let writer2 = SharedWriter(output2.clone());
+        let server2 = DapServer::new(
+            writer2,
+            PathBuf::from("/nonexistent"),
+            PathBuf::from("/nonexistent"),
+            Some("WarehouseApplication".to_string()),
+        );
+        server2
+            .handle_request(1, "threads", &json!({}), &dummy_threads_req)
+            .unwrap();
+        let msgs2 = output2.lock().unwrap().clone();
+        let mut cursor2 = Cursor::new(msgs2);
+        let resp2 = read_dap_message(&mut cursor2).unwrap().unwrap();
+        assert_eq!(resp2["body"]["threads"][0]["name"], "WarehouseApplication");
 
         // Manually set display name as done during launch
         *server.display_name.lock().unwrap() = Some("SystemApplication".to_string());
@@ -1257,6 +1273,7 @@ mod tests {
             writer,
             PathBuf::from("/nonexistent"),
             PathBuf::from("/nonexistent"),
+            None,
         );
 
         let term_req = json!({

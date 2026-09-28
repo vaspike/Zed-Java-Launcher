@@ -113,7 +113,10 @@ enum Action {
         zed: bool,
     },
     /// Run Debug Adapter Protocol (DAP) server for Zed integration.
-    Dap,
+    Dap {
+        #[arg(long)]
+        name: Option<String>,
+    },
     /// Start/stop a named group. Delays sequence launch requests, not health checks.
     Group {
         #[arg(value_enum)]
@@ -159,10 +162,10 @@ fn execute() -> Result<()> {
             }
         })
         .unwrap_or_else(|| root.join(".java-launcher/config.json"));
-    let command = cli.command.unwrap_or(Action::Dap);
-    if matches!(command, Action::Dap) {
+    let command = cli.command.unwrap_or(Action::Dap { name: None });
+    if let Action::Dap { name } = command {
         let stdin = std::io::stdin();
-        let server = dap::DapServer::new(std::io::stdout(), root, config_path);
+        let server = dap::DapServer::new(std::io::stdout(), root, config_path, name);
         return server.run(stdin.lock());
     }
     if matches!(command, Action::Doctor) {

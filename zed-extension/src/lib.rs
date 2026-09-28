@@ -38,9 +38,27 @@ impl zed::Extension for JavaLauncherExtension {
             "java-launcher".to_string()
         };
 
+        let mut arguments = vec!["dap".to_string()];
+        if let Ok(cfg) = zed::serde_json::from_str::<Value>(&config.config) {
+            if let Some(group) = cfg.get("group").and_then(|v| v.as_str()) {
+                arguments.push("--name".to_string());
+                arguments.push(format!("Group: {group}"));
+            } else if let Some(name) = cfg.get("name").and_then(|v| v.as_str()) {
+                arguments.push("--name".to_string());
+                arguments.push(name.to_string());
+            } else if let Some(entry) = cfg.get("entry").and_then(|v| v.as_str()) {
+                let label = entry.rsplit('.').next().unwrap_or(entry);
+                arguments.push("--name".to_string());
+                arguments.push(label.to_string());
+            } else if let Some(label) = cfg.get("label").and_then(|v| v.as_str()) {
+                arguments.push("--name".to_string());
+                arguments.push(label.to_string());
+            }
+        }
+
         Ok(DebugAdapterBinary {
             command: Some(binary_path),
-            arguments: vec!["dap".to_string()],
+            arguments,
             envs: vec![],
             cwd: Some(worktree.root_path()),
             connection: None,
