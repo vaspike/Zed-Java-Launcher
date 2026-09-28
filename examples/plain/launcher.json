@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "groups": {
+    "demo": [
+      { "entry": ".::demo.Alpha", "enabled": true, "delay_ms": 0 },
+      { "entry": ".::demo.Beta", "enabled": true, "delay_ms": 200 }
+    ]
+  }
+}

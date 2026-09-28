@@ -1,0 +1,33 @@
+[package]
+name = "zed-java-launcher"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+description = "Editor-independent Java launch manager with Zed tasks/debug integration"
+license = "MIT"
+
+[[bin]]
+name = "java-launcher"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4.5", features = ["derive"] }
+fs2 = "0.4"
+json5 = "0.4"
+libc = "0.2"
+roxmltree = "0.20"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+shell-words = "1"
+signal-hook = "0.3"
+tempfile = "3"
+tree-sitter = "0.25"
+tree-sitter-java = "0.23"
+tree-sitter-language = "=0.1.5"
+walkdir = "2"
+
+[profile.release]
+strip = true
+lto = "thin"
