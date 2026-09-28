@@ -18,6 +18,7 @@ It is currently a native CLI that generates Zed `tasks.json` / `debug.json` and 
 - Group up/down with ordered launch requests and delays.
 - Native Zed Java debug configs for single Spring Boot applications.
 - Literal `.env` loading for CLI-managed processes when configured.
+- Automatic Zed lifecycle binding: services started inside Zed automatically terminate when Zed quits (via macOS kernel `kqueue`), configurable via `"terminate_on_zed_quit": true/false` in `.java-launcher/config.json`.
 
 ## Important limits
 
@@ -39,13 +40,21 @@ In Zed, run the generated task `[Java Launcher] Open`. It opens the same TUI ins
 
 Keys:
 
-- `r` run selected application
-- `s` stop selected application
+- `r` / `Enter` run selected application or start group
+- `s` stop selected application or group
 - `R` restart selected application
-- `l` show current log path
-- `p` set Spring profile
-- `g` / `G` group up / group down
-- type to filter, `Backspace` edits the filter, `/` clears it
+- `d` run application with JDWP debug port (5005)
+- `Space` toggle start/stop
+- `l` open log viewer with scroll and refresh
+- `o` open log file directly in Zed editor (works in list view, log viewer, and CLI `logs -o`)
+- `m` toggle fullscreen in log viewer
+- `f` toggle live follow / pause in log viewer
+- `p` set/clear Spring profile with pre-filled editor
+- `g` / `G` group up / group down (or `Home` / `End` to jump)
+- `/` enter fuzzy search mode (`Esc`/`Enter` to confirm, results ranked by score)
+- `Tab` cycle entry filter (Spring Boot only / Apps / All)
+- `F5` reload Maven reactor and config
+- `?` show help popup
 - `q` quit
 
 By default `sync-zed` generates the Open task, group tasks, process tasks, and debug configs. Per-entry run/stop/restart tasks are only generated with `--include-main` or `--include-tests`.
@@ -60,6 +69,8 @@ java-launcher --project /path/to/project sync-zed --write --binary /absolute/pat
 java-launcher --project /path/to/project plan gateway
 java-launcher --project /path/to/project start gateway
 java-launcher --project /path/to/project ps
+java-launcher --project /path/to/project logs gateway -f
+java-launcher --project /path/to/project logs gateway -o   # Open in Zed
 java-launcher --project /path/to/project stop gateway
 java-launcher --project /path/to/project group up uis
 java-launcher --project /path/to/project group down uis

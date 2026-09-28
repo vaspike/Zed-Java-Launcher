@@ -37,6 +37,9 @@ struct RunArgs {
     debug_port: Option<u16>,
     #[arg(long, requires = "debug_port")]
     suspend: bool,
+    /// Watch a parent process PID and automatically terminate when it exits.
+    #[arg(long)]
+    watch_pid: Option<u32>,
 }
 #[derive(Subcommand)]
 enum Action {
@@ -95,6 +98,20 @@ enum Action {
     Restart(RunArgs),
     /// Persist the Spring profile without changing other launch options.
     Profile { entry: String, profile: String },
+    /// View or tail real-time logs for a managed entry.
+    Logs {
+        /// Stable ID, full class name, or unambiguous module name.
+        entry: String,
+        /// Stream log output in real time (like tail -f).
+        #[arg(short, long)]
+        follow: bool,
+        /// Number of lines to show from the end of the log.
+        #[arg(short = 'n', long, default_value_t = 100)]
+        lines: usize,
+        /// Open the log file directly in Zed editor.
+        #[arg(short = 'o', long)]
+        zed: bool,
+    },
     /// Interactive terminal UI for search, run, stop, logs, profiles, and groups.
     Ui,
     /// Start/stop a named group. Delays sequence launch requests, not health checks.
@@ -177,6 +194,43 @@ fn execute() -> Result<()> {
         let project = scan::scan(&root)?;
         let config = config::load(&config_path)?;
         return tui::open(&root, &config_path, &project, &config);
+    }
+    if let Action::Logs {
+        entry,
+        follow,
+        lines,
+        zed,
+    } = &cli.command
+    {
+        let id = if runtime::request(&root, entry, "status").is_ok() {
+            entry.clone()
+        } else {
+            scan::scan(&root)?.entry(entry)?.id.clone()
+        };
+        let log_path = match runtime::request(&root, &id, "status") {
+            Ok(s) => PathBuf::from(s.log),
+            Err(_) => runtime::state_dir(&root)?.join(format!("{}.log", runtime::hash(&id))),
+        };
+        if *zed {
+            return runtime::open_in_zed(&log_path);
+        }
+        if !log_path.exists() {
+            bail!(
+                "Log file not found for {id}: {}\nHas the service been started at least once?",
+                log_path.display()
+            );
+        }
+        let mut cmd = std::process::Command::new("tail");
+        cmd.arg("-n").arg(lines.to_string());
+        if *follow {
+            cmd.arg("-f");
+        }
+        cmd.arg(&log_path);
+        let status = cmd.status().context("Failed to run tail command")?;
+        if !status.success() {
+            std::process::exit(status.code().unwrap_or(1));
+        }
+        return Ok(());
     }
     if let Action::Stop { entry, all } = &cli.command {
         if *all {
@@ -311,10 +365,11 @@ fn execute() -> Result<()> {
                         args.skip_build,
                         args.debug_port,
                         args.suspend,
+                        args.watch_pid,
                     )?)?;
                 }
-                Action::Prepare(_) => runtime::run(&project, entry, &options, plan, None, true)?,
-                _ => runtime::run(&project, entry, &options, plan, args.debug_port, false)?,
+                Action::Prepare(_) => runtime::run(&project, entry, &options, plan, None, true, None)?,
+                _ => runtime::run(&project, entry, &options, plan, args.debug_port, false, args.watch_pid)?,
             }
         }
         Action::Profile { entry, profile } => {
@@ -377,7 +432,7 @@ fn execute() -> Result<()> {
             let mut started = vec![];
             for item in enabled {
                 thread::sleep(Duration::from_millis(item.delay_ms));
-                match runtime::start(&root, &config_path, &item.entry, skip_build, None, false) {
+                match runtime::start(&root, &config_path, &item.entry, skip_build, None, false, None) {
                     Ok(status) => {
                         started.push(item.entry.clone());
                         print_json(&status)?;

@@ -31,6 +31,167 @@ use std::{
 pub fn hash(value: &str) -> String {
     format!("{:x}", Sha256::digest(value.as_bytes()))[..20].to_owned()
 }
+
+pub fn find_zed_ancestor() -> Option<u32> {
+    if let Ok(val) = std::env::var("ZED_PID") {
+        if let Ok(pid) = val.parse::<u32>() {
+            return Some(pid);
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let mut current_pid = unsafe { libc::getppid() };
+        for _ in 0..20 {
+            if current_pid <= 1 {
+                break;
+            }
+            let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+            let size = std::mem::size_of::<libc::proc_bsdinfo>() as i32;
+            let ret = unsafe {
+                libc::proc_pidinfo(
+                    current_pid,
+                    libc::PROC_PIDTBSDINFO,
+                    0,
+                    &mut info as *mut _ as *mut libc::c_void,
+                    size,
+                )
+            };
+            if ret != size {
+                break;
+            }
+            let name = unsafe {
+                std::ffi::CStr::from_ptr(info.pbi_name.as_ptr())
+                    .to_string_lossy()
+                    .to_lowercase()
+            };
+            if name == "zed" || name == "zed-editor" || name.starts_with("zed") {
+                return Some(current_pid as u32);
+            }
+            if info.pbi_ppid <= 1 || info.pbi_ppid as i32 == current_pid {
+                break;
+            }
+            current_pid = info.pbi_ppid as i32;
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let mut current_pid = unsafe { libc::getppid() };
+        for _ in 0..20 {
+            if current_pid <= 1 {
+                break;
+            }
+            if let Ok(comm) = std::fs::read_to_string(format!("/proc/{current_pid}/comm")) {
+                let name = comm.trim().to_lowercase();
+                if name == "zed" || name == "zed-editor" || name.starts_with("zed") {
+                    return Some(current_pid as u32);
+                }
+            }
+            if let Ok(stat) = std::fs::read_to_string(format!("/proc/{current_pid}/stat")) {
+                if let Some(ppid_str) = stat.split_whitespace().nth(3) {
+                    if let Ok(ppid) = ppid_str.parse::<i32>() {
+                        if ppid <= 1 || ppid == current_pid {
+                            break;
+                        }
+                        current_pid = ppid;
+                        continue;
+                    }
+                }
+            }
+            break;
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn watch_process_exit(target_pid: u32, cancel: Arc<AtomicBool>) {
+    thread::spawn(move || {
+        let kq = unsafe { libc::kqueue() };
+        if kq < 0 {
+            while unsafe { libc::kill(target_pid as i32, 0) == 0 } {
+                if cancel.load(Ordering::Relaxed) {
+                    return;
+                }
+                thread::sleep(Duration::from_millis(500));
+            }
+            cancel.store(true, Ordering::Relaxed);
+            return;
+        }
+
+        let ke = libc::kevent {
+            ident: target_pid as usize,
+            filter: libc::EVFILT_PROC,
+            flags: libc::EV_ADD | libc::EV_ENABLE | libc::EV_ONESHOT,
+            fflags: libc::NOTE_EXIT,
+            data: 0,
+            udata: std::ptr::null_mut(),
+        };
+
+        let ret = unsafe {
+            libc::kevent(
+                kq,
+                &ke,
+                1,
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null(),
+            )
+        };
+
+        if ret < 0 {
+            unsafe { libc::close(kq) };
+            if unsafe { libc::kill(target_pid as i32, 0) != 0 } {
+                cancel.store(true, Ordering::Relaxed);
+            }
+            return;
+        }
+
+        let timeout = libc::timespec {
+            tv_sec: 1,
+            tv_nsec: 0,
+        };
+
+        let mut out_event: libc::kevent = unsafe { std::mem::zeroed() };
+        loop {
+            if cancel.load(Ordering::Relaxed) {
+                break;
+            }
+            let n = unsafe {
+                libc::kevent(
+                    kq,
+                    std::ptr::null(),
+                    0,
+                    &mut out_event,
+                    1,
+                    &timeout,
+                )
+            };
+            if n > 0 {
+                cancel.store(true, Ordering::Relaxed);
+                break;
+            } else if n < 0 {
+                if unsafe { libc::kill(target_pid as i32, 0) != 0 } {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+                break;
+            }
+        }
+        unsafe { libc::close(kq) };
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+fn watch_process_exit(target_pid: u32, cancel: Arc<AtomicBool>) {
+    thread::spawn(move || {
+        while unsafe { libc::kill(target_pid as i32, 0) == 0 } {
+            if cancel.load(Ordering::Relaxed) {
+                return;
+            }
+            thread::sleep(Duration::from_millis(500));
+        }
+        cancel.store(true, Ordering::Relaxed);
+    });
+}
 pub fn state_dir(root: &Path) -> Result<PathBuf> {
     let home = std::env::var_os("HOME").context("HOME is required")?;
     let base = std::env::var_os("JAVA_LAUNCHER_STATE_DIR")
@@ -67,6 +228,8 @@ pub struct Status {
     pub started_at: u64,
     pub debug_port: Option<u16>,
     pub log: String,
+    #[serde(default)]
+    pub watch_pid: Option<u32>,
 }
 pub fn request(root: &Path, id: &str, operation: &str) -> Result<Status> {
     let mut stream =
@@ -133,7 +296,7 @@ impl Drop for Supervisor {
     }
 }
 impl Supervisor {
-    fn new(root: &Path, id: &str, debug_port: Option<u16>) -> Result<Self> {
+    fn new(root: &Path, id: &str, debug_port: Option<u16>, watch_pid: Option<u32>) -> Result<Self> {
         let dir = state_dir(root)?;
         private_dir(&dir)?;
         let key = hash(id);
@@ -154,6 +317,9 @@ impl Supervisor {
         let listener = UnixListener::bind(&socket)?;
         listener.set_nonblocking(true)?;
         let cancel = Arc::new(AtomicBool::new(false));
+        if let Some(pid) = watch_pid {
+            watch_process_exit(pid, Arc::clone(&cancel));
+        }
         let mut signals = vec![];
         for signal in [
             signal_hook::consts::SIGINT,
@@ -173,6 +339,7 @@ impl Supervisor {
                 .join(format!("{key}.log"))
                 .to_string_lossy()
                 .into_owned(),
+            watch_pid,
         };
         let status_file = dir.join(format!("{key}.json"));
         config::atomic_json(&status_file, &status)?;
@@ -313,9 +480,10 @@ pub fn run(
     mut plan: Plan,
     debug_port: Option<u16>,
     prepare_only: bool,
+    watch_pid: Option<u32>,
 ) -> Result<()> {
     let env = config::environment(&project.root, options)?;
-    let mut supervisor = Supervisor::new(&project.root, &entry.id, debug_port)?;
+    let mut supervisor = Supervisor::new(&project.root, &entry.id, debug_port, watch_pid)?;
     let build_lock = supervisor.build_lock()?;
     if let Some(cp) = &plan.classpath_file {
         if cp.exists() {
@@ -343,6 +511,7 @@ pub fn start(
     skip_build: bool,
     debug_port: Option<u16>,
     suspend: bool,
+    watch_pid: Option<u32>,
 ) -> Result<Status> {
     if request(root, id, "status").is_ok() {
         bail!("Already running: {id}");
@@ -369,6 +538,17 @@ pub fn start(
     }
     if suspend {
         cmd.arg("--suspend");
+    }
+    let resolved_watch_pid = watch_pid.or_else(|| {
+        let options = config::load(config_path).ok().map(|c| c.options(id))?;
+        if options.terminate_on_zed_quit.unwrap_or(true) {
+            find_zed_ancestor()
+        } else {
+            None
+        }
+    });
+    if let Some(pid) = resolved_watch_pid {
+        cmd.args(["--watch-pid", &pid.to_string()]);
     }
     cmd.stdin(Stdio::null())
         .stdout(log.try_clone()?)
@@ -398,4 +578,43 @@ pub fn start(
     let _ = child.kill();
     let _ = child.wait();
     bail!("Supervisor did not acknowledge startup within 30 seconds")
+}
+
+pub fn open_in_zed(path: &Path) -> Result<()> {
+    if !path.exists() {
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path);
+    }
+
+    if std::process::Command::new("zed")
+        .arg(path)
+        .spawn()
+        .is_ok()
+    {
+        return Ok(());
+    }
+
+    if std::process::Command::new("/usr/local/bin/zed")
+        .arg(path)
+        .spawn()
+        .is_ok()
+    {
+        return Ok(());
+    }
+
+    if std::process::Command::new("open")
+        .args(["-a", "Zed"])
+        .arg(path)
+        .spawn()
+        .is_ok()
+    {
+        return Ok(());
+    }
+
+    bail!("Failed to launch Zed editor. Make sure 'zed' CLI or Zed.app is installed.")
 }

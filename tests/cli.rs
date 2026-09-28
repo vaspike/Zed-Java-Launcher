@@ -275,3 +275,64 @@ fn real_jvm_group_lifecycle_releases_ports_and_preserves_unrelated_process() {
     assert_ne!(before, after);
     f.ok(&["stop", "--all"]);
 }
+
+#[test]
+fn watched_pid_termination_cancels_service() {
+    let f = Fixture::new();
+    f.write(
+        "pom.xml",
+        r#"<project><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>root</artifactId><version>1</version><packaging>pom</packaging><modules><module>app</module></modules></project>"#,
+    );
+    f.write(
+        "app/pom.xml",
+        r#"<project><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>app</artifactId><version>1</version></project>"#,
+    );
+    f.source("app", "App");
+
+    let mut dummy = Command::new("sleep").arg("10").spawn().unwrap();
+    let dummy_pid = dummy.id();
+
+    let status = f.ok(&["start", "App", "--skip-build", "--watch-pid", &dummy_pid.to_string()]);
+    assert_eq!(status["entry"], "app::demo.App");
+    assert_eq!(status["watch_pid"], dummy_pid);
+
+    let ps = f.ok(&["ps"]);
+    assert_eq!(ps.as_array().unwrap().len(), 1);
+
+    dummy.kill().unwrap();
+    let _ = dummy.wait();
+
+    let deadline = Instant::now() + Duration::from_secs(4);
+    let mut stopped = false;
+    while Instant::now() < deadline {
+        let ps = f.ok(&["ps"]);
+        if ps.as_array().unwrap().is_empty() {
+            stopped = true;
+            break;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    assert!(stopped, "service did not terminate after watched process exited");
+}
+
+#[test]
+fn terminate_on_zed_quit_respects_config() {
+    let f = Fixture::new();
+    f.write(
+        "pom.xml",
+        r#"<project><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>root</artifactId><version>1</version><packaging>pom</packaging><modules><module>app</module></modules></project>"#,
+    );
+    f.write(
+        "app/pom.xml",
+        r#"<project><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>app</artifactId><version>1</version></project>"#,
+    );
+    f.source("app", "App");
+    f.write(
+        ".java-launcher/config.json",
+        r#"{"defaults":{"terminate_on_zed_quit":false}}"#,
+    );
+
+    let status = f.ok(&["start", "App", "--skip-build"]);
+    assert_eq!(status["entry"], "app::demo.App");
+    assert!(status["watch_pid"].is_null());
+}

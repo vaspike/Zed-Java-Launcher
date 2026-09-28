@@ -36,7 +36,7 @@ pub struct Module {
     pub packaging: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project {
     pub root: PathBuf,
     pub modules: Vec<Module>,
@@ -88,6 +88,8 @@ pub struct LaunchOptions {
     pub build: Option<bool>,
     // JDTLS project names need not equal Maven artifactIds.
     pub debug_project_name: Option<String>,
+    /// When true, automatically terminate this service if the parent Zed process exits.
+    pub terminate_on_zed_quit: Option<bool>,
 }
 
 impl LaunchOptions {
@@ -109,6 +111,9 @@ impl LaunchOptions {
                 .debug_project_name
                 .clone()
                 .or(self.debug_project_name.clone()),
+            terminate_on_zed_quit: other
+                .terminate_on_zed_quit
+                .or(self.terminate_on_zed_quit),
         }
     }
     pub fn jvm_args(&self) -> Vec<String> {
