@@ -67,16 +67,34 @@ ZIP_FILE="${DIST_DIR}/${PACKAGE_NAME}.zip"
 cd "${DIST_DIR}"
 rm -f "${TAR_FILE}" "${ZIP_FILE}"
 
+# Full bundle archives (includes extension.wasm, bin, install scripts)
 tar -czf "${TAR_FILE}" zed-java-launcher
 zip -r -q "${ZIP_FILE}" zed-java-launcher
+
+# Standalone binary archives for Zed extension auto-download
+STANDALONE_NAME="java-launcher-v${VERSION}-${OS}-${ARCH}"
+STANDALONE_TAR="${DIST_DIR}/${STANDALONE_NAME}.tar.gz"
+STANDALONE_ZIP="${DIST_DIR}/${STANDALONE_NAME}.zip"
+
+rm -f "${STANDALONE_TAR}" "${STANDALONE_ZIP}"
+(cd "${ROOT_DIR}/target/release" && tar -czf "${STANDALONE_TAR}" java-launcher)
+(cd "${ROOT_DIR}/target/release" && zip -q "${STANDALONE_ZIP}" java-launcher)
+
+# Also package x86_64-apple-darwin if present
+if [[ -f "${ROOT_DIR}/target/x86_64-apple-darwin/release/java-launcher" ]]; then
+    X86_NAME="java-launcher-v${VERSION}-darwin-x86_64"
+    (cd "${ROOT_DIR}/target/x86_64-apple-darwin/release" && tar -czf "${DIST_DIR}/${X86_NAME}.tar.gz" java-launcher)
+    (cd "${ROOT_DIR}/target/x86_64-apple-darwin/release" && zip -q "${DIST_DIR}/${X86_NAME}.zip" java-launcher)
+fi
 
 echo ""
 echo "=========================================="
 echo "  ✅ Standard package built successfully!"
 echo "=========================================="
 echo "Distribution files:"
-ls -lh "${DIST_DIR}/${PACKAGE_NAME}".*
+ls -lh "${DIST_DIR}"/java-launcher-v${VERSION}* "${DIST_DIR}/${PACKAGE_NAME}".*
 echo ""
 echo "Unpacked directory for Zed 'Install Dev Extension':"
 echo "  ${STAGE_DIR}"
 echo "=========================================="
+
