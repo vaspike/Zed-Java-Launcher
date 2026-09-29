@@ -144,8 +144,14 @@ This automatically imports your groups, Spring profiles, and arguments into `.ja
 
 ---
 
-### Requirements
+### Requirements & Build Tool Support
 
+- **Build Tools**:
+  - **Maven**: ✅ **Fully supported** (single-module and multi-module reactor projects with incremental compilation and instant scanning).
+  - **Plain Java**: ✅ **Supported** (simple standalone Java folders via `javac`).
+  - **Gradle**: ⚠️ **Not currently supported**.
+    > **Why isn't Gradle supported yet?**
+    > In VS Code, a heavy background daemon (Eclipse Buildship) silently handles Gradle builds behind the scenes. Zed, however, is designed to be ultra-lightweight and has no such daemon. Java Launcher relies on its own native Rust engine to manage compilation and assemble classpaths directly. While Maven has standardized structures and deterministic commands, Gradle build files are dynamic Groovy/Kotlin scripts where static analysis easily leads to subtle classpath errors. To ensure rock-solid stability, we prioritized perfecting the Maven experience first. Proper Gradle support is planned for a future update.
 - **OS**: macOS (Apple Silicon & Intel) or Linux (Ubuntu, Debian, Fedora, Arch, etc.), or Windows WSL2.
 - **JDK**: Java 17+ recommended for running Zed's JDTLS language server; your projects can be Java 8, 11, 17, or 21.
 - **Zed Extension**: Official `java` extension installed in Zed.
@@ -298,8 +304,14 @@ java-launcher init --from-vscode --write
 
 ---
 
-### 环境要求
+### 环境要求与构建工具支持
 
+- **构建工具**：
+  - **Maven**：✅ **完整原生支持**（单模块与多模块微服务集群，支持增量编译、类路径组装与秒级扫描）。
+  - **Plain Java**：✅ **支持**（无构建文件的纯 Java 目录，直接调用 `javac` 编译运行）。
+  - **Gradle**：⚠️ **当前暂不支持**。
+    > **为什么暂不支持 Gradle？**
+    > VS Code 底层有庞大的 Eclipse 后台插件（Buildship）在默默替扩展跑 Gradle 编译；但 Zed 追求极致轻量，并没有这套后台。Java Launcher 为了实现极速秒启，由 Rust 引擎直接管理编译与类路径。Maven 有标准的结构和依赖命令，而 Gradle 是动态脚本，静态分析很难 100% 靠谱。为了不给开发者制造诡异的类路径报错，目前优先把 Maven 做到了极致，Gradle 稳定支持已列入后续规划中。
 - **操作系统**：macOS (Apple Silicon / Intel)、Linux 各主流发行版（Ubuntu/Debian/Fedora/Arch 等）、或 Windows WSL2；
 - **JDK 环境**：本地需安装 JDK（推荐 JDK 17 或 21，兼容编译运行 Java 8/11/17/21 业务工程）；
 - **Zed 依赖**：需在 Zed 中安装官方提供的 **`java`** 扩展（用于提供 JDTLS 代码分析支持）。
