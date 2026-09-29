@@ -247,6 +247,150 @@ fn merge(
     }
     Ok((output, tracked))
 }
+
+fn merge_debug(
+    current: Vec<Value>,
+    generated: &[Value],
+    project: &Project,
+    config: &Config,
+    warnings: &mut Vec<String>,
+) -> Result<(Vec<Value>, BTreeMap<String, Value>)> {
+    let mut output = Vec::new();
+    let mut seen_labels = std::collections::BTreeSet::new();
+
+    // Track which services and groups already have debug configs in current
+    let mut covered_entries = std::collections::BTreeSet::new();
+    let mut covered_groups = std::collections::BTreeSet::new();
+
+    // 1. Process existing debug configurations in `current`
+    for item in current {
+        let label_str = match label(&item) {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+
+        if !seen_labels.insert(label_str.clone()) {
+            warnings.push(format!("Skipped duplicate debug configuration label: {}", label_str));
+            continue;
+        }
+
+        let is_attach = item
+            .get("request")
+            .and_then(Value::as_str)
+            .map(|r| r == "attach")
+            .unwrap_or(false)
+            || label_str.to_lowercase().contains("attach");
+
+        // Rule 1: Never delete attach configs
+        if is_attach {
+            output.push(item);
+            continue;
+        }
+
+        // Rule 2: Group configuration
+        if let Some(group_name) = item.get("group").and_then(Value::as_str) {
+            if config.groups.contains_key(group_name) {
+                // Group still exists -> preserve existing config and its label!
+                covered_groups.insert(group_name.to_string());
+                output.push(item);
+            } else {
+                // Group was deleted from config -> remove it
+                warnings.push(format!("Removed debug config for deleted group: {}", group_name));
+            }
+            continue;
+        }
+
+        // Rule 3: Service/class launch configuration
+        let entry_id = item.get("entry").and_then(Value::as_str);
+        let main_class = item.get("mainClass").and_then(Value::as_str);
+
+        if entry_id.is_some() || main_class.is_some() {
+            // Find if this entry/class still exists in project.entries
+            let matched_entry = project.entries.iter().find(|e| {
+                if let Some(id) = entry_id {
+                    if e.id == id {
+                        return true;
+                    }
+                }
+                if let Some(mc) = main_class {
+                    if e.class == mc {
+                        return true;
+                    }
+                }
+                false
+            });
+
+            if let Some(e) = matched_entry {
+                // Service still exists -> preserve existing config and its label!
+                covered_entries.insert(e.id.clone());
+                output.push(item);
+            } else {
+                // Service class was deleted/renamed -> remove it
+                let name = entry_id.or(main_class).unwrap_or(&label_str);
+                warnings.push(format!("Removed debug config for deleted service: {}", name));
+            }
+            continue;
+        }
+
+        // Rule 4: Any other user-defined configuration: preserve as-is!
+        output.push(item);
+    }
+
+    // 2. Incremental addition: Add newly generated configs that are not yet covered
+    for gen in generated {
+        // If it's a group config
+        if let Some(group_name) = gen.get("group").and_then(Value::as_str) {
+            if !covered_groups.contains(group_name) {
+                let mut l = label(gen)?;
+                let mut counter = 2;
+                while !seen_labels.insert(l.clone()) {
+                    l = format!("{}-{}", label(gen)?, counter);
+                    counter += 1;
+                }
+                let mut item = gen.clone();
+                item["label"] = json!(l);
+                covered_groups.insert(group_name.to_string());
+                output.push(item);
+            }
+            continue;
+        }
+
+        // If it's a service config
+        let gen_entry = gen.get("entry").and_then(Value::as_str);
+        let gen_class = gen.get("mainClass").and_then(Value::as_str);
+
+        let already_covered = project.entries.iter().any(|e| {
+            let matches = (gen_entry.is_some() && gen_entry == Some(&e.id))
+                || (gen_class.is_some() && gen_class == Some(&e.class));
+            matches && covered_entries.contains(&e.id)
+        });
+
+        if !already_covered {
+            let mut l = label(gen)?;
+            let mut counter = 2;
+            while !seen_labels.insert(l.clone()) {
+                l = format!("{}-{}", label(gen)?, counter);
+                counter += 1;
+            }
+            let mut item = gen.clone();
+            item["label"] = json!(l);
+            if let Some(id) = gen_entry {
+                covered_entries.insert(id.to_string());
+            }
+            output.push(item);
+        }
+    }
+
+    let mut tracked = BTreeMap::new();
+    for item in &output {
+        if let Ok(l) = label(item) {
+            tracked.insert(l, item.clone());
+        }
+    }
+
+    Ok((output, tracked))
+}
+
 fn backup(path: &Path) -> Result<()> {
     if !path.exists() {
         return Ok(());
@@ -263,7 +407,12 @@ fn backup(path: &Path) -> Result<()> {
 }
 /// Generates/merges BOTH files before writing either; each replacement is atomic.
 /// JSONC formatting/comments are retained in backups, not rewritten into generated JSON.
-pub fn sync(dir: &Path, generated: Generated) -> Result<Vec<String>> {
+pub fn sync(
+    dir: &Path,
+    generated: Generated,
+    project: &Project,
+    config: &Config,
+) -> Result<Vec<String>> {
     fs::create_dir_all(dir)?;
     let lock = fs::OpenOptions::new()
         .create(true)
@@ -296,10 +445,11 @@ pub fn sync(dir: &Path, generated: Generated) -> Result<Vec<String>> {
         &manifest.tasks,
         &mut warnings,
     )?;
-    let (debug, tracked_debug) = merge(
+    let (debug, tracked_debug) = merge_debug(
         old_debug.clone(),
         &generated.debug,
-        &manifest.debug,
+        project,
+        config,
         &mut warnings,
     )?;
     // Back up before writes, including manifest for manual recovery after an interrupted sync.
@@ -416,5 +566,137 @@ mod tests {
         // 3. Verify Attach localhost:5005 is NOT generated
         let attach = gen.debug.iter().find(|d| d["label"].as_str().unwrap_or("").contains("5005"));
         assert!(attach.is_none(), "Attach 5005 must not be generated");
+    }
+
+    #[test]
+    fn test_merge_debug_preserves_saved_labels_and_attaches_and_handles_incremental() {
+        let entry1 = Entry {
+            id: "warehouse::com.example.WarehouseApplication".into(),
+            kind: EntryKind::SpringBoot,
+            module: "warehouse".into(),
+            project_name: "warehouse-service".into(),
+            class: "com.example.WarehouseApplication".into(),
+            method: None,
+            file: "warehouse/src/main/java/com/example/WarehouseApplication.java".into(),
+            line: 10,
+        };
+        let entry2 = Entry {
+            id: "websocket::com.example.WebsocketApplication".into(),
+            kind: EntryKind::SpringBoot,
+            module: "websocket".into(),
+            project_name: "websocket-service".into(),
+            class: "com.example.WebsocketApplication".into(),
+            method: None,
+            file: "websocket/src/main/java/com/example/WebsocketApplication.java".into(),
+            line: 10,
+        };
+        let project = Project {
+            root: PathBuf::from("/tmp/test-project"),
+            modules: vec![],
+            entries: vec![entry1, entry2],
+            warnings: vec![],
+        };
+        let mut config = Config::default();
+        config.groups.insert(
+            "uis".into(),
+            vec![],
+        );
+
+        // Existing debug.json has:
+        // 1. Existing service with custom / older label "[Java Launcher] Debug WarehouseApplication"
+        // 2. An attach configuration "[Java Launcher] Attach localhost:5005"
+        // 3. A custom attach configuration "Attach to remote JVM"
+        // 4. A service that was deleted from the codebase "com.example.DeletedApplication"
+        // 5. A group that was deleted from config "old_group"
+        let current = vec![
+            json!({
+                "label": "[Java Launcher] Debug WarehouseApplication",
+                "adapter": "Java",
+                "request": "launch",
+                "mainClass": "com.example.WarehouseApplication",
+                "vmArgs": "-Xmx1024m"
+            }),
+            json!({
+                "label": "[Java Launcher] Attach localhost:5005",
+                "adapter": "Java",
+                "request": "attach",
+                "hostName": "127.0.0.1",
+                "port": 5005
+            }),
+            json!({
+                "label": "Attach to remote JVM",
+                "adapter": "Java",
+                "request": "attach",
+                "port": 5006
+            }),
+            json!({
+                "label": "JL-DeletedApplication",
+                "adapter": "java-launcher",
+                "request": "launch",
+                "mainClass": "com.example.DeletedApplication"
+            }),
+            json!({
+                "label": "JL-Group-old_group",
+                "adapter": "java-launcher",
+                "request": "launch",
+                "group": "old_group"
+            }),
+        ];
+
+        // Newly generated configs:
+        // 1. JL-WarehouseApplication (already covered by existing config!)
+        // 2. JL-WebsocketApplication (NEW service!)
+        // 3. JL-Group-uis (NEW group!)
+        let generated = vec![
+            json!({
+                "label": "JL-WarehouseApplication",
+                "name": "WarehouseApplication",
+                "adapter": "java-launcher",
+                "request": "launch",
+                "entry": "warehouse::com.example.WarehouseApplication",
+                "mainClass": "com.example.WarehouseApplication"
+            }),
+            json!({
+                "label": "JL-WebsocketApplication",
+                "name": "WebsocketApplication",
+                "adapter": "java-launcher",
+                "request": "launch",
+                "entry": "websocket::com.example.WebsocketApplication",
+                "mainClass": "com.example.WebsocketApplication"
+            }),
+            json!({
+                "label": "JL-Group-uis",
+                "adapter": "java-launcher",
+                "request": "launch",
+                "group": "uis"
+            }),
+        ];
+
+        let mut warnings = vec![];
+        let (merged, _) = merge_debug(current, &generated, &project, &config, &mut warnings).unwrap();
+
+        let labels: Vec<String> = merged.iter().map(|item| item["label"].as_str().unwrap().to_string()).collect();
+
+        // 1. Existing service label MUST NOT be modified!
+        assert!(labels.contains(&"[Java Launcher] Debug WarehouseApplication".to_string()));
+        assert!(!labels.contains(&"JL-WarehouseApplication".to_string()), "Must not replace existing label with new label");
+        let warehouse = merged.iter().find(|i| i["label"] == "[Java Launcher] Debug WarehouseApplication").unwrap();
+        assert_eq!(warehouse["vmArgs"], "-Xmx1024m", "Preserves existing configuration contents");
+
+        // 2. Attach configurations MUST NOT be deleted!
+        assert!(labels.contains(&"[Java Launcher] Attach localhost:5005".to_string()));
+        assert!(labels.contains(&"Attach to remote JVM".to_string()));
+
+        // 3. Newly discovered service MUST be incrementally added!
+        assert!(labels.contains(&"JL-WebsocketApplication".to_string()));
+
+        // 4. Newly discovered group MUST be incrementally added!
+        assert!(labels.contains(&"JL-Group-uis".to_string()));
+
+        // 5. Deleted service MUST be removed!
+        assert!(!labels.contains(&"JL-DeletedApplication".to_string()));
+
+        // 6. Deleted group MUST be removed!
+        assert!(!labels.contains(&"JL-Group-old_group".to_string()));
     }
 }

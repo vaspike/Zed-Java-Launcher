@@ -335,7 +335,7 @@ fn execute() -> Result<()> {
             )?;
             if write || output_dir.is_some() {
                 let dir = output_dir.unwrap_or_else(|| root.join(".zed"));
-                warn(&zed::sync(&dir, generated)?);
+                warn(&zed::sync(&dir, generated, &project, &config)?);
                 println!("Wrote {}/tasks.json and debug.json", dir.display());
             } else {
                 print_json(&generated)?;
