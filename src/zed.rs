@@ -83,10 +83,28 @@ pub fn generate(
         if !include {
             continue;
         }
+        let short_name = entry
+            .class
+            .rsplit('.')
+            .next()
+            .unwrap_or(&entry.class);
+        let is_duplicate = project
+            .entries
+            .iter()
+            .filter(|e| {
+                (e.kind == EntryKind::SpringBoot || (include_main && e.kind == EntryKind::Main))
+                    && e.class.rsplit('.').next() == Some(short_name)
+            })
+            .count()
+            > 1;
+        let service_name = if is_duplicate {
+            format!("{}-{}", entry.module, short_name)
+        } else {
+            short_name.to_string()
+        };
         let label = format!(
-            "{} / {}{}",
-            entry.module,
-            entry.class,
+            "{}{}",
+            service_name,
             entry
                 .method
                 .as_ref()
@@ -94,23 +112,26 @@ pub fn generate(
                 .unwrap_or_default()
         );
         if include_main || include_tests {
-            out.tasks.push(task(
-                &format!(
-                    "{PREFIX} {} {label}",
-                    if entry.kind.is_test() { "Test" } else { "Run" }
-                ),
-                command(&["run", &entry.id]),
-                root,
-            ));
-            if !entry.kind.is_test() {
+            if entry.kind.is_test() {
                 out.tasks.push(task(
-                    &format!("{PREFIX} Stop {label}"),
-                    command(&["stop", &entry.id]),
+                    &format!("[JL] {label}: Test"),
+                    command(&["run", &entry.id]),
+                    root,
+                ));
+            } else {
+                out.tasks.push(task(
+                    &format!("[JL] {label}: Run"),
+                    command(&["run", &entry.id]),
                     root,
                 ));
                 out.tasks.push(task(
-                    &format!("{PREFIX} Restart {label}"),
+                    &format!("[JL] {label}: Restart"),
                     command(&["restart", &entry.id]),
+                    root,
+                ));
+                out.tasks.push(task(
+                    &format!("[JL] {label}: Stop"),
+                    command(&["stop", &entry.id]),
                     root,
                 ));
             }
@@ -128,20 +149,6 @@ pub fn generate(
             .as_ref()
             .map(|v| config::expand(root, v))
             .unwrap_or(root.clone());
-        let short_name = entry
-            .class
-            .rsplit('.')
-            .next()
-            .unwrap_or(&entry.class);
-        let is_duplicate = project
-            .entries
-            .iter()
-            .filter(|e| {
-                (e.kind == EntryKind::SpringBoot || (include_main && e.kind == EntryKind::Main))
-                    && e.class.rsplit('.').next() == Some(short_name)
-            })
-            .count()
-            > 1;
         let debug_label = if is_duplicate {
             format!("JL-{}-{}", entry.module, short_name)
         } else {
@@ -586,6 +593,12 @@ mod tests {
         // 5. Verify Refresh configurations tasks
         assert!(gen.tasks.iter().any(|t| t["label"] == "[Java Launcher] Refresh configurations"));
         assert!(gen.tasks.iter().any(|t| t["label"] == "[Java Launcher] Refresh configurations (include main)"));
+
+        // 6. Verify single service tasks with include_main
+        let gen_main = generate(&project, &config, &config_path, &binary, true, false).unwrap();
+        assert!(gen_main.tasks.iter().any(|t| t["label"] == "[JL] WarehouseApplication: Run"));
+        assert!(gen_main.tasks.iter().any(|t| t["label"] == "[JL] WarehouseApplication: Restart"));
+        assert!(gen_main.tasks.iter().any(|t| t["label"] == "[JL] WarehouseApplication: Stop"));
     }
 
     #[test]
