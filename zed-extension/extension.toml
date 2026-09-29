@@ -13,6 +13,3 @@ version = "0.7.0"
 [debug_adapters.java-launcher]
 schema_path = "debug_adapter_schemas/java-launcher.json"
 
-[slash_commands.launcher]
-description = "Quick guide and actions for Java Launcher"
-requires_argument = false

@@ -248,23 +248,6 @@ impl zed::Extension for JavaLauncherExtension {
         Ok(StartDebuggingRequestArgumentsRequest::Launch)
     }
 
-    fn run_slash_command(
-        &self,
-        command: zed::SlashCommand,
-        _args: Vec<String>,
-        _worktree: Option<&zed::Worktree>,
-    ) -> Result<zed::SlashCommandOutput, String> {
-        match command.name.as_str() {
-            "launcher" => Ok(zed::SlashCommandOutput {
-                sections: vec![zed::SlashCommandOutputSection {
-                    range: (0usize..13usize).into(),
-                    label: "Java Launcher".to_string(),
-                }],
-                text: "Java Launcher is ready.\n\nQuick Actions in Zed:\n  • In Zed Debug Panel: select 'JL-Group-<group>' to debug a group, or 'JL-<service>' to debug a single service\n  • Press Cmd+Shift+P -> search 'task: spawn' -> select '[Java Launcher] Group up <group>' to start a group\n  • Press Cmd+Shift+P -> search 'task: spawn' -> select '[Java Launcher] Group restart <group>' to restart a group\n  • Press Cmd+Shift+P -> search 'task: spawn' -> select '[Java Launcher] Group down <group>' to stop a group".to_string(),
-            }),
-            _ => Err("Unknown slash command".to_string()),
-        }
-    }
 }
 
 zed::register_extension!(JavaLauncherExtension);
