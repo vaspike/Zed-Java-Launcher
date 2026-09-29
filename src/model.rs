@@ -146,6 +146,8 @@ fn enabled() -> bool {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
+    #[serde(rename = "$schema", default, skip_serializing_if = "Option::is_none")]
+    pub schema: Option<String>,
     pub version: u32,
     pub defaults: LaunchOptions,
     pub entries: BTreeMap<String, LaunchOptions>,
@@ -154,6 +156,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            schema: Some("./config.schema.json".into()),
             version: 1,
             defaults: LaunchOptions::default(),
             entries: BTreeMap::new(),

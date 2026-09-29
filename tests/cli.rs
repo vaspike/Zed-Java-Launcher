@@ -386,3 +386,47 @@ fn clean_logs_truncates_state_and_dap_logs() {
 
     f.ok(&["stop", "--all"]);
 }
+
+#[test]
+fn sync_zed_generates_schema_and_group_validation_hints() {
+    let f = Fixture::new();
+    f.write(
+        "pom.xml",
+        r#"<project><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>root</artifactId><version>1</version><packaging>pom</packaging><modules><module>app</module></modules></project>"#,
+    );
+    f.write(
+        "app/pom.xml",
+        r#"<project><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>app</artifactId><version>1</version></project>"#,
+    );
+    f.source("app", "App");
+
+    f.write(
+        ".java-launcher/config.json",
+        r#"{"groups":{"my_group":[{"entry":"app::demo.App"}]}}"#,
+    );
+
+    f.ok(&["sync-zed", "--write"]);
+
+    // Verify config.schema.json was written
+    let schema_file = f.root().join(".java-launcher/config.schema.json");
+    assert!(schema_file.exists());
+    let schema: Value = serde_json::from_slice(&fs::read(&schema_file).unwrap()).unwrap();
+    let enums = schema["definitions"]["GroupItem"]["properties"]["entry"]["enum"].as_array().unwrap();
+    assert!(enums.contains(&json!("app::demo.App")));
+
+    // Verify config.json received "$schema" reference
+    let config_content = fs::read_to_string(f.root().join(".java-launcher/config.json")).unwrap();
+    assert!(config_content.contains("\"$schema\": \"./config.schema.json\""));
+
+    // Verify invalid group entry gives diagnostic error listing available services
+    f.write(
+        ".java-launcher/config.json",
+        r#"{"groups":{"bad_group":[{"entry":"app::demo.Nonexistent"}]}}"#,
+    );
+    let out = f.run(&["sync-zed", "--write"]);
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("Invalid group 'bad_group'"));
+    assert!(stderr.contains("Available services in this project"));
+    assert!(stderr.contains("app::demo.App"));
+}

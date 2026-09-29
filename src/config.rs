@@ -1,7 +1,7 @@
 use crate::model::{Config, EntryKind, GroupItem, LaunchOptions, Project};
 use anyhow::{bail, Context, Result};
 use serde::{de::DeserializeOwned, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::{
     collections::BTreeMap,
     fs,
@@ -24,6 +24,195 @@ pub fn load(path: &Path) -> Result<Config> {
     }
     Ok(config)
 }
+pub fn schema_path(config_path: &Path) -> PathBuf {
+    config_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("config.schema.json")
+}
+
+pub fn generate_schema(project: &Project) -> Value {
+    let mut runnable_entries: Vec<(&str, String)> = project
+        .entries
+        .iter()
+        .filter(|e| !e.kind.is_test())
+        .map(|e| {
+            let desc = format!(
+                "{} / {} ({})",
+                e.module,
+                e.class.rsplit('.').next().unwrap_or(&e.class),
+                match e.kind {
+                    EntryKind::SpringBoot => "Spring Boot",
+                    EntryKind::Main => "Main Class",
+                    _ => "Runnable",
+                }
+            );
+            (e.id.as_str(), desc)
+        })
+        .collect();
+    runnable_entries.sort_by(|a, b| a.0.cmp(b.0));
+
+    let entry_ids: Vec<&str> = runnable_entries.iter().map(|(id, _)| *id).collect();
+    let entry_descs: Vec<&str> = runnable_entries.iter().map(|(_, desc)| desc.as_str()).collect();
+
+    json!({
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "title": "Java Launcher Configuration Schema",
+        "description": "Configuration schema for .java-launcher/config.json with project-aware autocompletion",
+        "type": "object",
+        "properties": {
+            "$schema": {
+                "type": "string",
+                "description": "Path or URL to JSON Schema definition"
+            },
+            "version": {
+                "type": "integer",
+                "default": 1,
+                "description": "Configuration file schema version (must be 1)"
+            },
+            "defaults": {
+                "$ref": "#/definitions/LaunchOptions",
+                "description": "Default launch options inherited by all services in this project"
+            },
+            "entries": {
+                "type": "object",
+                "description": "Per-service launch options overriding defaults, keyed by service entry ID",
+                "propertyNames": {
+                    "enum": entry_ids
+                },
+                "additionalProperties": {
+                    "$ref": "#/definitions/LaunchOptions"
+                }
+            },
+            "groups": {
+                "type": "object",
+                "description": "Named service groups for sequential batch launching, restarting, and debugging",
+                "additionalProperties": {
+                    "type": "array",
+                    "description": "List of services in this group, launched sequentially in array order",
+                    "items": {
+                        "$ref": "#/definitions/GroupItem"
+                    }
+                }
+            }
+        },
+        "definitions": {
+            "GroupItem": {
+                "type": "object",
+                "required": ["entry"],
+                "properties": {
+                    "entry": {
+                        "type": "string",
+                        "description": "Target service entry ID (e.g. module::ClassName). Select from discovered project services.",
+                        "enum": entry_ids,
+                        "enumDescriptions": entry_descs,
+                        "markdownEnumDescriptions": entry_descs
+                    },
+                    "delay_ms": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 0,
+                        "description": "Delay in milliseconds to wait before starting the next service in the group (useful for dependency startup order)"
+                    },
+                    "enabled": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Whether this service is enabled in this group (set to false to temporarily skip launching, default: true)"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Optional custom human-readable display alias for this service in group logs and debug sessions"
+                    }
+                },
+                "additionalProperties": false
+            },
+            "LaunchOptions": {
+                "type": "object",
+                "properties": {
+                    "spring_profile": {
+                        "type": "string",
+                        "description": "Active Spring profile (sets -Dspring.profiles.active=<profile>)"
+                    },
+                    "vm_args": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "JVM arguments passed to the java executable (e.g. ['-Xmx512m'])"
+                    },
+                    "args": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Program arguments passed to the application main method"
+                    },
+                    "env": {
+                        "type": "object",
+                        "additionalProperties": { "type": "string" },
+                        "description": "Environment variables passed to the child process"
+                    },
+                    "env_file": {
+                        "type": "string",
+                        "description": "Path to a .env file containing environment variables (relative to workspace root)"
+                    },
+                    "cwd": {
+                        "type": "string",
+                        "description": "Working directory for the process (supports ${workspaceFolder})"
+                    },
+                    "java_home": {
+                        "type": "string",
+                        "description": "Path to custom JDK home directory for running this service"
+                    },
+                    "maven_profiles": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Maven profiles to activate during compile (-P)"
+                    },
+                    "maven_args": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Additional Maven CLI arguments during compile"
+                    },
+                    "build": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Whether to run Maven compile before launch (default: true)"
+                    },
+                    "debug_project_name": {
+                        "type": "string",
+                        "description": "JDTLS project name override if different from Maven artifactId"
+                    },
+                    "terminate_on_zed_quit": {
+                        "type": "boolean",
+                        "description": "Whether to terminate this service automatically when the parent Zed process exits"
+                    }
+                },
+                "additionalProperties": false
+            }
+        }
+    })
+}
+
+pub fn write_schema(config_path: &Path, project: &Project) -> Result<PathBuf> {
+    let path = schema_path(config_path);
+    let schema = generate_schema(project);
+    atomic_json(&path, &schema)?;
+    Ok(path)
+}
+
+pub fn ensure_schema_ref(config_path: &Path) -> Result<()> {
+    if !config_path.exists() {
+        return Ok(());
+    }
+    let content = fs::read_to_string(config_path)?;
+    if !content.contains("$schema") {
+        if let Some(pos) = content.find('{') {
+            let mut updated = content[..=pos].to_string();
+            updated.push_str("\n  \"$schema\": \"./config.schema.json\",");
+            updated.push_str(&content[pos + 1..]);
+            fs::write(config_path, updated)?;
+        }
+    }
+    Ok(())
+}
+
 pub fn atomic_json(path: &Path, value: &impl Serialize) -> Result<()> {
     let parent = path.parent().context("Output has no parent directory")?;
     fs::create_dir_all(parent)?;
@@ -290,4 +479,38 @@ mod tests {
         assert_eq!(env["A"], "override");
         assert_eq!(env["B"], "$(do-not-execute)");
     }
+    #[test]
+    fn schema_generation_includes_project_entries_and_group_definitions() {
+        let entry = crate::model::Entry {
+            id: "warehouse::com.example.WarehouseApplication".into(),
+            kind: EntryKind::SpringBoot,
+            module: "warehouse".into(),
+            project_name: "warehouse-service".into(),
+            class: "com.example.WarehouseApplication".into(),
+            method: None,
+            file: "warehouse/src/main/java/com/example/WarehouseApplication.java".into(),
+            line: 10,
+        };
+        let project = Project {
+            root: PathBuf::from("/tmp/test-project"),
+            modules: vec![],
+            entries: vec![entry],
+            warnings: vec![],
+        };
+        let schema = generate_schema(&project);
+        assert_eq!(schema["$schema"], "http://json-schema.org/draft-07/schema#");
+        let entry_enums = schema["definitions"]["GroupItem"]["properties"]["entry"]["enum"].as_array().unwrap();
+        assert_eq!(entry_enums, &vec![json!("warehouse::com.example.WarehouseApplication")]);
+        let entry_descs = schema["definitions"]["GroupItem"]["properties"]["entry"]["enumDescriptions"].as_array().unwrap();
+        assert!(entry_descs[0].as_str().unwrap().contains("WarehouseApplication (Spring Boot)"));
+
+        // Verify ensure_schema_ref inserts $schema when missing
+        let d = tempfile::tempdir().unwrap();
+        let cfg = d.path().join("config.json");
+        fs::write(&cfg, "{\n  \"version\": 1\n}\n").unwrap();
+        ensure_schema_ref(&cfg).unwrap();
+        let content = fs::read_to_string(&cfg).unwrap();
+        assert!(content.contains("\"$schema\": \"./config.schema.json\""));
+    }
 }
+

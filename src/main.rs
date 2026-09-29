@@ -345,6 +345,7 @@ fn execute() -> Result<()> {
                 warn(&config::import_vscode(&project, &mut config)?);
             }
             if write {
+                config::write_schema(&config_path, &project)?;
                 config::atomic_json(&config_path, &config)?;
                 println!("Wrote {}", config_path.display());
             } else {
@@ -373,6 +374,8 @@ fn execute() -> Result<()> {
             if write || output_dir.is_some() {
                 let dir = output_dir.unwrap_or_else(|| root.join(".zed"));
                 warn(&zed::sync(&dir, generated, &project, &config)?);
+                config::write_schema(&config_path, &project)?;
+                let _ = config::ensure_schema_ref(&config_path);
                 println!("Wrote {}/tasks.json and debug.json", dir.display());
             } else {
                 print_json(&generated)?;

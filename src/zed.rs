@@ -187,9 +187,19 @@ pub fn generate(
     }
     for (name, items) in &config.groups {
         for item in items.iter().filter(|i| i.enabled) {
-            project
-                .entry(&item.entry)
-                .with_context(|| format!("Invalid group {name}"))?;
+            if let Err(e) = project.entry(&item.entry) {
+                let available: Vec<_> = project
+                    .entries
+                    .iter()
+                    .filter(|e| !e.kind.is_test())
+                    .map(|e| e.id.as_str())
+                    .collect();
+                bail!(
+                    "Invalid group '{name}': {}\nAvailable services in this project:\n  • {}",
+                    e,
+                    available.join("\n  • ")
+                );
+            }
         }
         out.debug.push(json!({
             "label": format!("JL-Group-{name}"),
