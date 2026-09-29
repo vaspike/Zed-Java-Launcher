@@ -112,6 +112,11 @@ fn import_and_sync_preserve_profile_and_user_configs() {
         .unwrap()
         .iter()
         .any(|v| v["label"] == "[Java Launcher] Refresh configurations"));
+    assert!(ts
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v["label"] == "[Java Launcher] Refresh configurations (include main)"));
     assert!(!ts
         .as_array()
         .unwrap()

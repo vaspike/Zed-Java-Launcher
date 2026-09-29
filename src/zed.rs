@@ -49,15 +49,21 @@ pub fn generate(
     };
     let command = |args: &[&str]| shell_command(binary, root, config_path, args);
     let mut refresh_args = vec!["sync-zed", "--write"];
-    if include_main {
-        refresh_args.push("--include-main");
-    }
     if include_tests {
         refresh_args.push("--include-tests");
     }
     out.tasks.push(task(
         &format!("{PREFIX} Refresh configurations"),
         command(&refresh_args),
+        root,
+    ));
+    let mut refresh_main_args = vec!["sync-zed", "--include-main", "--write"];
+    if include_tests {
+        refresh_main_args.push("--include-tests");
+    }
+    out.tasks.push(task(
+        &format!("{PREFIX} Refresh configurations (include main)"),
+        command(&refresh_main_args),
         root,
     ));
     out.tasks.push(task(
@@ -576,6 +582,10 @@ mod tests {
         assert!(gen.tasks.iter().any(|t| t["label"] == "[Java Launcher] Group up uis"));
         assert!(gen.tasks.iter().any(|t| t["label"] == "[Java Launcher] Group restart uis"));
         assert!(gen.tasks.iter().any(|t| t["label"] == "[Java Launcher] Group down uis"));
+
+        // 5. Verify Refresh configurations tasks
+        assert!(gen.tasks.iter().any(|t| t["label"] == "[Java Launcher] Refresh configurations"));
+        assert!(gen.tasks.iter().any(|t| t["label"] == "[Java Launcher] Refresh configurations (include main)"));
     }
 
     #[test]
