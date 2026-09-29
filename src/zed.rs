@@ -122,11 +122,39 @@ pub fn generate(
             .as_ref()
             .map(|v| config::expand(root, v))
             .unwrap_or(root.clone());
+        let short_name = entry
+            .class
+            .rsplit('.')
+            .next()
+            .unwrap_or(&entry.class);
+        let is_duplicate = project
+            .entries
+            .iter()
+            .filter(|e| {
+                (e.kind == EntryKind::SpringBoot || (include_main && e.kind == EntryKind::Main))
+                    && e.class.rsplit('.').next() == Some(short_name)
+            })
+            .count()
+            > 1;
+        let debug_label = if is_duplicate {
+            format!("JL-{}-{}", entry.module, short_name)
+        } else {
+            format!("JL-{}", short_name)
+        };
         let mut debug = json!({
-            "label":format!("{PREFIX} Debug {label}"), "adapter":"Java", "request":"launch", "mainClass":entry.class,
-            "projectName":options.debug_project_name.as_deref().unwrap_or(&entry.project_name),
-            "cwd":cwd, "vmArgs":options.jvm_args(), "args":options.args.clone().unwrap_or_default(), "env":options.env,
-            "console":"integratedTerminal", "stopOnEntry":false,
+            "label": debug_label,
+            "name": short_name,
+            "adapter": "java-launcher",
+            "request": "launch",
+            "entry": entry.id,
+            "mainClass": entry.class,
+            "projectName": options.debug_project_name.as_deref().unwrap_or(&entry.project_name),
+            "cwd": cwd,
+            "vmArgs": options.jvm_args(),
+            "args": options.args.clone().unwrap_or_default(),
+            "env": options.env,
+            "console": "integratedTerminal",
+            "stopOnEntry": false,
         });
         if let Some(home) = &options.java_home {
             debug["javaExec"] = json!(config::expand(root, home).join("bin/java"));
@@ -146,7 +174,7 @@ pub fn generate(
                 .with_context(|| format!("Invalid group {name}"))?;
         }
         out.debug.push(json!({
-            "label": format!("{PREFIX} 🚀 Group: {name}"),
+            "label": format!("JL-Group-{name}"),
             "adapter": "java-launcher",
             "request": "launch",
             "group": name,
@@ -162,7 +190,6 @@ pub fn generate(
             root,
         ));
     }
-    out.debug.push(json!({"label":format!("{PREFIX} Attach localhost:5005"), "adapter":"Java", "request":"attach", "hostName":"127.0.0.1", "port":5005}));
     Ok(out)
 }
 fn label(value: &Value) -> Result<String> {
@@ -300,6 +327,8 @@ pub fn sync(dir: &Path, generated: Generated) -> Result<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::Entry;
+    use std::path::PathBuf;
     #[test]
     fn preserves_user_entries_and_managed_edits() {
         let old = json!({"label":"managed", "vmArgs":"old"});
@@ -336,5 +365,56 @@ mod tests {
         .unwrap()
         .0
         .is_empty());
+    }
+
+    #[test]
+    fn test_simplified_jl_labels_and_no_attach_5005() {
+        let entry = Entry {
+            id: "warehouse::com.example.WarehouseApplication".into(),
+            kind: EntryKind::SpringBoot,
+            module: "warehouse".into(),
+            project_name: "warehouse-service".into(),
+            class: "com.example.WarehouseApplication".into(),
+            method: None,
+            file: "warehouse/src/main/java/com/example/WarehouseApplication.java".into(),
+            line: 10,
+        };
+        let project = Project {
+            root: PathBuf::from("/tmp/test-project"),
+            modules: vec![],
+            entries: vec![entry],
+            warnings: vec![],
+        };
+        let mut config = Config::default();
+        config.groups.insert(
+            "uis".into(),
+            vec![crate::model::GroupItem {
+                entry: "warehouse::com.example.WarehouseApplication".into(),
+                name: Some("WarehouseApplication".into()),
+                enabled: true,
+                delay_ms: 0,
+            }],
+        );
+        let config_path = PathBuf::from("/tmp/test-project/.java-launcher/config.json");
+        let binary = PathBuf::from("/tmp/bin/java-launcher");
+        let gen = generate(&project, &config, &config_path, &binary, false, false).unwrap();
+
+        // 1. Verify single service debug label is JL-WarehouseApplication
+        let single_debug = gen.debug.iter().find(|d| d["label"] == "JL-WarehouseApplication");
+        assert!(single_debug.is_some(), "Expected JL-WarehouseApplication in debug configs");
+        let single = single_debug.unwrap();
+        assert_eq!(single["adapter"], "java-launcher");
+        assert_eq!(single["name"], "WarehouseApplication");
+
+        // 2. Verify group debug label is JL-Group-uis
+        let group_debug = gen.debug.iter().find(|d| d["label"] == "JL-Group-uis");
+        assert!(group_debug.is_some(), "Expected JL-Group-uis in debug configs");
+        let group = group_debug.unwrap();
+        assert_eq!(group["adapter"], "java-launcher");
+        assert_eq!(group["group"], "uis");
+
+        // 3. Verify Attach localhost:5005 is NOT generated
+        let attach = gen.debug.iter().find(|d| d["label"].as_str().unwrap_or("").contains("5005"));
+        assert!(attach.is_none(), "Attach 5005 must not be generated");
     }
 }

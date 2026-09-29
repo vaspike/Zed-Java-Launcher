@@ -92,7 +92,7 @@ impl zed::Extension for JavaLauncherExtension {
                     range: (0usize..13usize).into(),
                     label: "Java Launcher".to_string(),
                 }],
-                text: "Java Launcher is ready.\n\nQuick Actions in Zed:\n  • In Zed Debug Panel: select '🚀 Group: <name>' to launch a group of microservices\n  • Press Cmd+Shift+P -> search 'task: spawn' -> select '[Java Launcher] Group up <group>' to start a group\n  • Press Cmd+Shift+P -> search 'task: spawn' -> select '[Java Launcher] Group down <group>' to stop a group".to_string(),
+                text: "Java Launcher is ready.\n\nQuick Actions in Zed:\n  • In Zed Debug Panel: select 'JL-Group-<group>' to debug a group, or 'JL-<service>' to debug a single service\n  • Press Cmd+Shift+P -> search 'task: spawn' -> select '[Java Launcher] Group up <group>' to start a group\n  • Press Cmd+Shift+P -> search 'task: spawn' -> select '[Java Launcher] Group down <group>' to stop a group".to_string(),
             }),
             _ => Err("Unknown slash command".to_string()),
         }
