@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Java Launcher — Modern Java Microservice Orchestrator & Debugger for Zed & VS Code</title>
+  <meta name="description" content="零配置、全自动发现、无端口冲突的现代 Java 微服务启动与调试神器。原生支持 Zed 与 VS Code。">
+  <link rel="icon" type="image/png" href="assets/logo.png">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <!-- Ambient Glowing Background -->
+  <div class="bg-ambient-lights">
+    <div class="ambient-orb ambient-orb-1"></div>
+    <div class="ambient-orb ambient-orb-2"></div>
+    <div class="ambient-orb ambient-orb-3"></div>
+  </div>
+  <div class="bg-grid-overlay"></div>
+
+  <!-- Header & Navigation -->
+  <header class="site-header">
+    <div class="container nav-inner">
+      <a href="#" class="brand-link">
+        <img src="assets/logo.png" alt="Java Launcher Logo" class="brand-logo">
+        <div class="brand-title">Java<span>Launcher</span></div>
+      </a>
+
+      <nav>
+        <ul class="nav-menu">
+          <li><a href="#features" class="nav-link">核心特性</a></li>
+          <li><a href="#editions" class="nav-link">双端架构</a></li>
+          <li><a href="#comparison" class="nav-link">版本对比</a></li>
+          <li><a href="#simulator" class="nav-link">终端模拟</a></li>
+          <li><a href="#install" class="nav-link">快速安装</a></li>
+        </ul>
+      </nav>
+
+      <div class="nav-actions">
+        <button id="themeToggleBtn" class="theme-toggle-btn" aria-label="Toggle Theme">
+          <!-- Injected by app.js -->
+        </button>
+        <a href="https://github.com/vaspike/zed-java-launcher" target="_blank" rel="noopener noreferrer" class="github-btn">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
+          </svg>
+          <span>GitHub</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="hero-section">
+    <div class="container">
+      <div class="release-pill">
+        <span class="badge">v1.5.0</span>
+        <span>Dual Engine: 原生 Rust 内核 (Zed) + 全景可视化面板 (VS Code)</span>
+      </div>
+
+      <h1 class="hero-title">
+        现代 Java 微服务<br>
+        <span class="gradient-text">零配置·开箱即用</span>
+      </h1>
+
+      <p class="hero-subtitle">
+        专为 Java & Spring Boot 开发者打造的轻量级微服务编排与调试利器。
+        告别繁琐的 <code>launch.json</code> 与端口 <code>5005</code> 冲突，支持服务集群一键编排、动态调试端口分配与秒级项目解析。
+      </p>
+
+      <div class="hero-cta-group">
+        <a href="#install-zed" class="btn btn-zed">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+          </svg>
+          <span>安装 Zed 官方插件</span>
+        </a>
+        <a href="#install-vscode" class="btn btn-vscode">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="16 18 22 12 16 6"></polyline>
+            <polyline points="8 6 2 12 8 18"></polyline>
+          </svg>
+          <span>安装 VS Code 插件</span>
+        </a>
+        <a href="https://github.com/vaspike/zed-java-launcher/releases" target="_blank" rel="noopener noreferrer" class="btn btn-ghost">
+          <span>Release 产物下载</span>
+        </a>
+      </div>
+
+      <!-- Interactive Dual Showcase Window -->
+      <div class="showcase-wrapper">
+        <div class="showcase-switcher">
+          <button id="tabZed" class="switcher-tab active-zed">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+            </svg>
+            <span>⚡️ Zed Edition (Native Rust Engine)</span>
+          </button>
+          <button id="tabVSCode" class="switcher-tab">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="16 18 22 12 16 6"></polyline>
+              <polyline points="8 6 2 12 8 18"></polyline>
+            </svg>
+            <span>🔷 VS Code Edition (Interactive GUI)</span>
+          </button>
+        </div>
+
+        <div class="editor-window">
+          <!-- Window Titlebar -->
+          <div class="editor-titlebar">
+            <div class="window-controls">
+              <span class="dot red"></span>
+              <span class="dot yellow"></span>
+              <span class="dot green"></span>
+            </div>
+            <div class="window-title">
+              <span id="windowBadge" class="window-badge zed-badge">Zed Edition</span>
+              <span id="windowTitle">zed-java-project — .java-launcher/config.json</span>
+            </div>
+            <div style="width: 50px;"></div>
+          </div>
+
+          <!-- Window Body -->
+          <div class="editor-body">
+            <!-- Simulated Sidebar -->
+            <div class="editor-sidebar">
+              <div id="sidebarHeading" class="sidebar-heading">Zed Worktree & Tasks</div>
+              <ul id="sidebarTree" class="tree-list">
+                <!-- Injected by app.js -->
+              </ul>
+            </div>
+
+            <!-- Code & Terminal Area -->
+            <div class="editor-content-area">
+              <div id="editorTabs" class="editor-tabs">
+                <!-- Injected by app.js -->
+              </div>
+              <div id="codeView" class="code-view">
+                <!-- Injected by app.js -->
+              </div>
+              <div class="editor-terminal">
+                <div class="terminal-header">
+                  <span>Terminal / Process Output</span>
+                  <span>zsh (java-launcher v1.5.0)</span>
+                </div>
+                <div id="terminalLines">
+                  <!-- Injected by app.js -->
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Core Value Proposition -->
+  <section id="features" class="section">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-tag">Why Java Launcher?</span>
+        <h2 class="section-title">重构 Java 本地微服务调试体验</h2>
+        <p class="section-desc">
+          直击多微服务开发痛点，提供专为现代轻量级编辑器定制的启动与调试管线。
+        </p>
+      </div>
+
+      <div class="features-grid">
+        <div class="feature-card">
+          <div class="feature-icon-wrapper icon-purple">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          </div>
+          <h3 class="feature-title">动态 JDWP 端口隔离</h3>
+          <p class="feature-desc">
+            告别 <code>Address already in use: 5005</code>！Java Launcher 自动为每个微服务分配并协商专属调试端口，支持 10+ 服务并发断点调试，零端口冲突。
+          </p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon-wrapper icon-emerald">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+          </div>
+          <h3 class="feature-title">微服务一键编排 (Group Launch)</h3>
+          <p class="feature-desc">
+            只需声明启动顺序与延时（如网关启动后延时 2s 启动订单服务），一键即可 <code>Group up</code>、<code>Group restart</code> 优雅重启或 <code>Group down</code> 批量停止。
+          </p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon-wrapper icon-cyan">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          </div>
+          <h3 class="feature-title">AST 毫秒级智能扫描</h3>
+          <p class="feature-desc">
+            利用 Tree-sitter 高性能语法分析器与 Maven 反应堆模型，零 Java 进程开销，毫秒级扫描 <code>@SpringBootApplication</code>、<code>main</code> 入口与测试类。
+          </p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon-wrapper icon-pink">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
+          </div>
+          <h3 class="feature-title">双向无缝迁移与互通</h3>
+          <p class="feature-desc">
+            从 VS Code 迁移到 Zed？只需一条命令 <code>java-launcher init --from-vscode</code>，自动将旧配置与聚合启动无损转换为 Zed 专属配置。
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Dual Edition Deep Dive -->
+  <section id="editions" class="section" style="background: rgba(15, 19, 28, 0.4);">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-tag">Dual-Engine Architecture</span>
+        <h2 class="section-title">两种编辑器，同样的极速体验</h2>
+        <p class="section-desc">
+          针对 Zed 的极简键盘流与 VS Code 的可视化交互深度定制，量身打磨。
+        </p>
+      </div>
+
+      <div class="deep-dive-grid">
+        <!-- Zed Edition -->
+        <div class="edition-box zed-box">
+          <div>
+            <div class="edition-header">
+              <div class="edition-icon" style="background: rgba(16, 185, 129, 0.15); color: #34d399;">⚡</div>
+              <div>
+                <h3 class="edition-name">Zed Edition</h3>
+                <span class="edition-badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399;">Rust 原生内核 + WASM</span>
+              </div>
+            </div>
+            <p class="edition-desc">
+              专为 Zed 编辑器量身打造。采用纯 Rust 编译的原生 CLI + WASM 扩展，内存占用低于 10MB，自动由 Zed 插件商店拉取运行。
+            </p>
+            <ul class="feature-checklist">
+              <li><span class="check-icon">✓</span> <strong>极速 Run 模式与 Debug 模式分离</strong>：日常运行无需挂载调试器，无任何额外 RAM 开销。</li>
+              <li><span class="check-icon">✓</span> <strong>Zed 专属 DAP 调试适配器</strong>：完全接管 Zed 调试面板，一键调试 <code>JL-Group-&lt;group&gt;</code>。</li>
+              <li><span class="check-icon">✓</span> <strong>自动补全 Schema</strong>：编辑 <code>config.json</code> 时自动弹出全工程可用服务下拉提示。</li>
+              <li><span class="check-icon">✓</span> <strong>洁癖模式 (Clean Mode)</strong>：防面板污染，避免数十个服务充斥 Zed 命令面板。</li>
+              <li><span class="check-icon">✓</span> <strong>安全自动备份与日志清空</strong>：修改配置自动时间戳备份，一键清空后台日志。</li>
+            </ul>
+          </div>
+          <a href="https://github.com/vaspike/zed-java-launcher" target="_blank" rel="noopener noreferrer" class="btn btn-zed" style="width: 100%; justify-content: center;">
+            <span>探索 Zed 插件源码</span>
+          </a>
+        </div>
+
+        <!-- VS Code Edition -->
+        <div class="edition-box vscode-box">
+          <div>
+            <div class="edition-header">
+              <div class="edition-icon" style="background: rgba(14, 165, 233, 0.15); color: #38bdf8;">🔷</div>
+              <div>
+                <h3 class="edition-name">VS Code Edition</h3>
+                <span class="edition-badge" style="background: rgba(14, 165, 233, 0.2); color: #38bdf8;">全功能可视化交互</span>
+              </div>
+            </div>
+            <p class="edition-desc">
+              提供 Visual Studio Code 活动栏 (Activity Bar) 树状视图，通过图形化交互完成 Spring Profile 切换、聚合配置与进程管控。
+            </p>
+            <ul class="feature-checklist">
+              <li><span class="check-icon">✓</span> <strong>Activity Bar 视图导航</strong>：一目了然列出所有 Spring Boot、Main 方法与单元测试。</li>
+              <li><span class="check-icon">✓</span> <strong>Spring Active Profile 快速切换</strong>：支持单个服务或全工程批量设为 <code>dev</code>、<code>test</code>、<code>prod</code>。</li>
+              <li><span class="check-icon">✓</span> <strong>JMX 远程管理集成</strong>：支持一键开关 JMX Remote，实时监控 JVM 运行指标。</li>
+              <li><span class="check-icon">✓</span> <strong>可视化聚合启动器</strong>：图形化拖拽或右键将服务追加至聚合启动列表。</li>
+              <li><span class="check-icon">✓</span> <strong>单元测试方法级定位</strong>：直接精准运行 JUnit 4/5 或 TestNG 单个测试用例。</li>
+            </ul>
+          </div>
+          <a href="https://github.com/vaspike/Java-Launcher" target="_blank" rel="noopener noreferrer" class="btn btn-vscode" style="width: 100%; justify-content: center;">
+            <span>探索 VS Code 插件源码</span>
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Comparison Table -->
+  <section id="comparison" class="section">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-tag">Comparison Matrix</span>
+        <h2 class="section-title">全方位特性对照</h2>
+        <p class="section-desc">看看 Java Launcher 相比传统 IDE 或手动配置能为你节省多少时间</p>
+      </div>
+
+      <div class="table-wrapper">
+        <table class="comparison-table">
+          <thead>
+            <tr>
+              <th>能力维度</th>
+              <th>传统手工配置 / 默认调试</th>
+              <th>Java Launcher (VS Code)</th>
+              <th>Java Launcher (Zed)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>入口自动发现</td>
+              <td><span class="pill-status pill-red">✗ 手动寻找类名与包路径</span></td>
+              <td><span class="pill-status pill-blue">✓ 侧边栏树形自动罗列</span></td>
+              <td><span class="pill-status pill-green">✓ AST 毫秒级全工程扫描</span></td>
+            </tr>
+            <tr>
+              <td>多微服务集群启动</td>
+              <td><span class="pill-status pill-red">✗ 开启 8-10 个终端标签页</span></td>
+              <td><span class="pill-status pill-blue">✓ 聚合启动 (Aggregated Launch)</span></td>
+              <td><span class="pill-status pill-green">✓ Group 编排 (支持顺序与毫秒延时)</span></td>
+            </tr>
+            <tr>
+              <td>调试端口冲突处理</td>
+              <td><span class="pill-status pill-red">✗ 频发 5005 Address in use</span></td>
+              <td><span class="pill-status pill-blue">✓ 多任务 launch.json 独立端口</span></td>
+              <td><span class="pill-status pill-green">✓ 动态 JDWP 端口协商与路由</span></td>
+            </tr>
+            <tr>
+              <td>底层架构与开销</td>
+              <td><span class="pill-status pill-gray">— IDE 臃肿重度守护</span></td>
+              <td><span class="pill-status pill-blue">✓ TypeScript + VSCode API</span></td>
+              <td><span class="pill-status pill-green">✓ 纯 Rust 原生二进制 (&lt;10MB)</span></td>
+            </tr>
+            <tr>
+              <td>免调试轻量运行 (Run)</td>
+              <td><span class="pill-status pill-gray">△ 手写 java/mvn 脚本</span></td>
+              <td><span class="pill-status pill-blue">✓ 支持无调试器直接运行</span></td>
+              <td><span class="pill-status pill-green">✓ 零调试端口、原生终端直跑</span></td>
+            </tr>
+            <tr>
+              <td>构建系统支持</td>
+              <td><span class="pill-status pill-gray">— 手动指定</span></td>
+              <td><span class="pill-status pill-blue">✓ Maven + Gradle</span></td>
+              <td><span class="pill-status pill-green">✓ Maven 多模块 Reactor</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- Interactive Terminal Simulator -->
+  <section id="simulator" class="section" style="background: rgba(15, 19, 28, 0.4);">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-tag">Interactive Demo</span>
+        <h2 class="section-title">在线体验命令行编排</h2>
+        <p class="section-desc">点击下方常用命令，查看 Java Launcher 引擎的实际执行流程与输出效果</p>
+      </div>
+
+      <div class="terminal-interactive-box">
+        <div class="terminal-bar">
+          <div class="window-controls">
+            <span class="dot red"></span>
+            <span class="dot yellow"></span>
+            <span class="dot green"></span>
+          </div>
+          <span style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-muted);">
+            terminal — java-launcher engine v1.5.0
+          </span>
+          <div></div>
+        </div>
+
+        <div class="terminal-cmd-buttons">
+          <button class="cmd-pill active" data-cmd="scan">java-launcher scan --all</button>
+          <button class="cmd-pill" data-cmd="init">java-launcher init --write</button>
+          <button class="cmd-pill" data-cmd="group">java-launcher group up dev-cluster</button>
+          <button class="cmd-pill" data-cmd="dap">java-launcher dap</button>
+        </div>
+
+        <div id="simTerminalViewport" class="terminal-viewport">
+          <div class="terminal-line"><span class="terminal-prompt">$ java-launcher scan --all</span></div>
+          <div class="terminal-line"><span class="terminal-accent">[INFO]</span> Resolving Maven reactor in /workspace/spring-cloud-demo...</div>
+          <div class="terminal-line"><span class="terminal-accent">[SCAN]</span> Analyzed 68 Java source files with tree-sitter in 38ms</div>
+          <div class="terminal-line"><span class="terminal-success">✔ Discovered 4 Spring Boot Applications:</span></div>
+          <div class="terminal-line">&nbsp;&nbsp;• gateway &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;-> com.example.cloud.GatewayApplication</div>
+          <div class="terminal-line">&nbsp;&nbsp;• user-service &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;-> com.example.cloud.UserApplication</div>
+          <div class="terminal-line">&nbsp;&nbsp;• order-service &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;-> com.example.cloud.OrderApplication</div>
+          <div class="terminal-line">&nbsp;&nbsp;• notification-app &nbsp;&nbsp;&nbsp;-> com.example.cloud.NotificationApplication</div>
+          <div class="terminal-line"><span class="terminal-success">✔ Discovered 12 Test Suites (JUnit 5 &amp; TestNG)</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Installation Section -->
+  <section id="install" class="section">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-tag">Get Started</span>
+        <h2 class="section-title">30 秒快速上手</h2>
+        <p class="section-desc">挑选适合您工作流的安装方式</p>
+      </div>
+
+      <div class="install-tabs">
+        <button class="install-tab-btn active" data-target="panel-zed">Zed 编辑器</button>
+        <button class="install-tab-btn" data-target="panel-vscode">VS Code 编辑器</button>
+        <button class="install-tab-btn" data-target="panel-cli">独立 CLI 二进制</button>
+      </div>
+
+      <!-- Zed Guide -->
+      <div id="panel-zed" class="install-panel active">
+        <div class="step-card">
+          <div class="step-num">1</div>
+          <div class="step-content">
+            <h4 class="step-title">从 Zed 插件中心安装</h4>
+            <p class="step-desc">打开 Zed，按 <code>Cmd+Shift+P</code> 搜索 <code>zed: extensions</code>，搜索 <strong>Java Launcher</strong> 并点击安装。</p>
+            <div class="code-box">
+              <span>Zed Command Palette -> zed: extensions -> Search "Java Launcher"</span>
+            </div>
+          </div>
+        </div>
+        <div class="step-card">
+          <div class="step-num">2</div>
+          <div class="step-content">
+            <h4 class="step-title">初始化工程配置</h4>
+            <p class="step-desc">在任意 Java / Spring Boot 工程中，按快捷键唤起命令并执行初始化：</p>
+            <div class="code-box">
+              <span>Cmd+Shift+P -> task: spawn -> [Java Launcher] Initialize Project</span>
+              <button class="copy-btn" data-copy="task: spawn -> [Java Launcher] Initialize Project">复制</button>
+            </div>
+          </div>
+        </div>
+        <div class="step-card">
+          <div class="step-num">3</div>
+          <div class="step-content">
+            <h4 class="step-title">一键运行或调试</h4>
+            <p class="step-desc">打开左侧 Debug 面板，选择 <code>JL-&lt;ServiceName&gt;</code> 或 <code>JL-Group-&lt;GroupName&gt;</code> 点击启动即可享受无冲突断点调试！</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- VSCode Guide -->
+      <div id="panel-vscode" class="install-panel">
+        <div class="step-card">
+          <div class="step-num">1</div>
+          <div class="step-content">
+            <h4 class="step-title">从 VS Code 插件市场安装</h4>
+            <p class="step-desc">打开 VS Code 扩展商店，搜索 <strong>Java Launcher</strong>，点击安装。</p>
+            <div class="code-box">
+              <span>code --install-extension River.java-launcher</span>
+              <button class="copy-btn" data-copy="code --install-extension River.java-launcher">复制</button>
+            </div>
+          </div>
+        </div>
+        <div class="step-card">
+          <div class="step-num">2</div>
+          <div class="step-content">
+            <h4 class="step-title">使用 Activity Bar 树形面板</h4>
+            <p class="step-desc">安装后活动栏将出现 Java Launcher 图标，自动扫描当前工程所有入口，点击服务名称右侧 ▶ 即可运行或配置聚合启动。</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Standalone CLI Guide -->
+      <div id="panel-cli" class="install-panel">
+        <div class="step-card">
+          <div class="step-num">1</div>
+          <div class="step-content">
+            <h4 class="step-title">通过 Cargo 安装 (全平台)</h4>
+            <p class="step-desc">如果您已安装 Rust 工具链，可直接编译安装最新稳定版：</p>
+            <div class="code-box">
+              <span>cargo install --git https://github.com/vaspike/zed-java-launcher</span>
+              <button class="copy-btn" data-copy="cargo install --git https://github.com/vaspike/zed-java-launcher">复制</button>
+            </div>
+          </div>
+        </div>
+        <div class="step-card">
+          <div class="step-num">2</div>
+          <div class="step-content">
+            <h4 class="step-title">或下载 GitHub Releases 预编译包</h4>
+            <p class="step-desc">提供 macOS (Apple Silicon / Intel)、Linux (x86_64 / arm64) 以及 Windows 的独立预编译二进制压缩包。</p>
+            <div class="code-box">
+              <span>curl -sL https://github.com/vaspike/zed-java-launcher/releases/latest</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-top">
+        <div class="footer-brand">
+          <a href="#" class="brand-link">
+            <img src="assets/logo.png" alt="Java Launcher" class="brand-logo">
+            <div class="brand-title">Java<span>Launcher</span></div>
+          </a>
+          <p class="footer-desc">
+            为下一代轻量级开发者编辑器打造的 Java 微服务启动编排与调试引擎。
+          </p>
+        </div>
+
+        <div class="footer-nav-group">
+          <div class="footer-col">
+            <h4>生态与仓库</h4>
+            <ul>
+              <li><a href="https://github.com/vaspike/zed-java-launcher" target="_blank" rel="noopener">Zed Edition (GitHub)</a></li>
+              <li><a href="https://github.com/vaspike/Java-Launcher" target="_blank" rel="noopener">VS Code Edition (GitHub)</a></li>
+              <li><a href="https://github.com/zed-industries/extensions/pull/7806" target="_blank" rel="noopener">Zed Store PR (#7806)</a></li>
+              <li><a href="https://github.com/vaspike/zed-java-launcher/releases" target="_blank" rel="noopener">Releases 下载</a></li>
+            </ul>
+          </div>
+
+          <div class="footer-col">
+            <h4>快速导航</h4>
+            <ul>
+              <li><a href="#features">核心价值</a></li>
+              <li><a href="#editions">双端架构</a></li>
+              <li><a href="#comparison">版本对照</a></li>
+              <li><a href="#simulator">命令行模拟</a></li>
+            </ul>
+          </div>
+
+          <div class="footer-col">
+            <h4>开源与许可</h4>
+            <ul>
+              <li><a href="https://github.com/vaspike/zed-java-launcher/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a></li>
+              <li><a href="https://zed.dev/extensions" target="_blank" rel="noopener">Zed Extension Registry</a></li>
+              <li><a href="https://marketplace.visualstudio.com" target="_blank" rel="noopener">VS Code Marketplace</a></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="footer-bottom">
+        <div>© 2026 Java Launcher. Open source under the MIT License. Crafted by <a href="https://github.com/vaspike" target="_blank" rel="noopener" style="color: var(--accent-indigo); text-decoration: none;">vaspike</a>.</div>
+        <div>Built for speed, aesthetics, and developer happiness.</div>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Toast Notification -->
+  <div id="toastNotification" class="toast">Copied to clipboard!</div>
+
+  <script src="app.js"></script>
+</body>
+</html>
