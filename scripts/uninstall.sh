@@ -37,7 +37,7 @@ if os.path.exists(tasks_file):
                 lines = [l for l in content.splitlines() if not l.strip().startswith("//")]
                 tasks = json.loads("\n".join(lines))
                 if isinstance(tasks, list):
-                    filtered = [t for t in tasks if not (isinstance(t, dict) and t.get("label", "").startswith("Java Launcher:"))]
+                    filtered = [t for t in tasks if not (isinstance(t, dict) and (t.get("label", "").startswith("Java Launcher:") or t.get("label", "").startswith("[Java Launcher]")))]
                     with open(tasks_file, "w", encoding="utf-8") as out_f:
                         json.dump(filtered, out_f, indent=2, ensure_ascii=False)
                         out_f.write("\n")

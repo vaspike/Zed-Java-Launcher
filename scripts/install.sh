@@ -66,17 +66,10 @@ tasks_file = os.path.join(config_dir, "tasks.json")
 
 new_tasks = [
     {
-        "label": "Java Launcher: Initialize Project (.zed)",
+        "label": "[Java Launcher] Initialize Project",
         "command": "java-launcher",
         "args": ["sync-zed", "--write"],
         "use_new_terminal": False,
-        "allow_concurrent_runs": False
-    },
-    {
-        "label": "Java Launcher: Open Control Panel (TUI)",
-        "command": "java-launcher",
-        "args": ["ui"],
-        "use_new_terminal": True,
         "allow_concurrent_runs": False
     }
 ]
@@ -94,11 +87,17 @@ if os.path.exists(tasks_file):
     except Exception as e:
         print(f"   Notice: Existing tasks.json could not be parsed: {e}")
 
+# Clean up obsolete legacy bootstrap tasks
+cleaned_tasks = [
+    t for t in existing_tasks
+    if not (isinstance(t, dict) and t.get("label", "").startswith("Java Launcher:"))
+]
+
 task_map = {t["label"]: t for t in new_tasks}
 merged = []
 seen = set()
 
-for t in existing_tasks:
+for t in cleaned_tasks:
     if isinstance(t, dict) and "label" in t:
         lbl = t["label"]
         if lbl in task_map:
@@ -122,17 +121,10 @@ else
         cat << 'EOF' > "${ZED_TASKS_FILE}"
 [
   {
-    "label": "Java Launcher: Initialize Project (.zed)",
+    "label": "[Java Launcher] Initialize Project",
     "command": "java-launcher",
     "args": ["sync-zed", "--write"],
     "use_new_terminal": false,
-    "allow_concurrent_runs": false
-  },
-  {
-    "label": "Java Launcher: Open Control Panel (TUI)",
-    "command": "java-launcher",
-    "args": ["ui"],
-    "use_new_terminal": true,
     "allow_concurrent_runs": false
   }
 ]
@@ -148,6 +140,6 @@ echo ""
 echo "Quick Start inside Zed (Zero Command Line Needed!):"
 echo "1. Open any Java / Spring Boot project in Zed."
 echo "2. Press Cmd+Shift+P -> search 'task: spawn' (or press Ctrl+T)."
-echo "3. Run 'Java Launcher: Initialize Project (.zed)'."
+echo "3. Run '[Java Launcher] Initialize Project'."
 echo "4. Done! All project tasks and debug configurations are now live in Zed."
 echo "=========================================="
