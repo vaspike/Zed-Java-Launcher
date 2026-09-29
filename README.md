@@ -24,11 +24,15 @@ If you develop multi-module Java / Spring Boot applications in Zed, you've proba
 
 ### Quick Start (30 Seconds)
 
-1. **Install the extension**: Search for `Java Launcher` in Zed's Extensions menu.
-2. **Scan and generate configs**: Open your Java project in Zed. Press `Cmd+Shift+P` (or `Ctrl+Shift+P` on Linux) -> select `task: spawn` -> click **`[Java Launcher] Refresh configurations`**.
+1. **Install the extension**: Search for `Java Launcher` in Zed's Extensions menu (or install via offline package).
+2. **Initialize your project**:
+   - Open your Java / Spring Boot project in Zed.
+   - Press `Cmd+Shift+P` (or `Ctrl+Shift+P` on Linux) -> select `task: spawn` -> click **`[Java Launcher] Initialize Project`** *(or run `java-launcher init --write` in terminal)*.
+   - The plugin automatically scans your project and generates all Zed debug and task configurations.
 3. **Run or Debug**:
    - **To Debug**: Click Zed's Debug panel (bottom/left) -> pick `JL-<ServiceName>` or `JL-Group-<GroupName>` -> click ▶️.
-   - **To Run (fast, no debugger)**: Press `Cmd+Shift+P` -> `task: spawn` -> type part of your service name -> pick `[JL] <ServiceName>: Run`.
+   - **To Run (fast, no debugger)**: Press `Cmd+Shift+P` -> `task: spawn` -> pick `[JL] <ServiceName>: Run` or `[Java Launcher] Group up <GroupName>`.
+   - **To Refresh**: Whenever you add new services or modules, just click **`[Java Launcher] Refresh configurations`**.
 
 ---
 
@@ -49,7 +53,7 @@ If you develop multi-module Java / Spring Boot applications in Zed, you've proba
 A **Group** allows you to launch, restart, or debug a cluster of microservices with a single click.
 
 #### Step 1: Open `.java-launcher/config.json`
-*(If it doesn't exist yet, run `[Java Launcher] Refresh configurations` in Zed to create it).*
+*(If it doesn't exist yet, run `[Java Launcher] Initialize Project` in Zed to create it).*
 
 #### Step 2: Add your group under `"groups"`
 ```jsonc
@@ -109,7 +113,8 @@ Java Launcher is completely transparent. Here is every file it creates in your p
 
 Press `Cmd+Shift+P` -> type `task: spawn`:
 
-- **`[Java Launcher] Refresh configurations`**: Scans the project, updates tasks and debug configs.
+- **`[Java Launcher] Initialize Project`**: Initial bootstrap task (global). Scans a fresh project and creates all Zed tasks and debug configs.
+- **`[Java Launcher] Refresh configurations`**: Scans the project, updates tasks and debug configs (Clean Mode, recommended).
 - **`[Java Launcher] Refresh configurations (include main)`**: Full sync mode. Also generates individual Run / Stop / Restart tasks for every service in your project.
 - **`[Java Launcher] Group up <group>`**: Starts all services in the group in order.
 - **`[Java Launcher] Group restart <group>`**: Gracefully restarts the group.
@@ -172,12 +177,15 @@ This automatically imports your groups, Spring profiles, and arguments into `.ja
 
 ### 30 秒极速上手
 
-1. **安装插件**：在 Zed 扩展面板中搜索 `Java Launcher` 并安装；
-2. **初始化配置**：在 Zed 中打开 Java 项目，按快捷键 `Cmd+Shift+P`（Linux 为 `Ctrl+Shift+P`）$\rightarrow$ 搜索 `task: spawn` $\rightarrow$ 点击 **`[Java Launcher] Refresh configurations`**；
-   *(插件会自动扫描所有 Maven 模块，生成对应的调试配置与任务)*。
+1. **安装插件**：在 Zed 扩展面板中搜索 `Java Launcher` 并安装（或使用离线安装包）；
+2. **一键初始化项目**：
+   - 在 Zed 中打开任意 Java / Spring Boot 项目；
+   - 按快捷键 `Cmd+Shift+P`（Linux 为 `Ctrl+Shift+P`）$\rightarrow$ 搜索 `task: spawn` $\rightarrow$ 点击 **`[Java Launcher] Initialize Project`**；*(也可以在项目终端中执行 `java-launcher init --write`)*；
+   - 插件会自动扫描所有 Maven 模块，在项目下生成 `.zed` 与 `.java-launcher` 配置；
 3. **开始运行与调试**：
    - **调试（Debug）**：点击 Zed 底部/左侧的 Debug 面板 $\rightarrow$ 选择 `JL-<服务名>` 或 `JL-Group-<组名>` $\rightarrow$ 点击 ▶️ 即可进入断点调试；
-   - **运行（Run，极速无调试器）**：按 `Cmd+Shift+P` $\rightarrow$ `task: spawn` $\rightarrow$ 输入服务名 $\rightarrow$ 选择 **`[JL] <服务名>: Run`**。
+   - **运行（Run，极速无调试器）**：按 `Cmd+Shift+P` $\rightarrow$ `task: spawn` $\rightarrow$ 选择 **`[JL] <服务名>: Run`** 或 **`[Java Launcher] Group up <组名>`**；
+   - **后续刷新**：工程新增模块或微服务后，随时点击 **`[Java Launcher] Refresh configurations`** 即可同步最新配置。
 
 ---
 
@@ -198,7 +206,7 @@ This automatically imports your groups, Spring profiles, and arguments into `.ja
 通过服务组（Group），你可以一键拉起、重启或停止一整套微服务集群，并能精确控制每个服务的先后启动延迟。
 
 #### 第一步：打开 `.java-launcher/config.json`
-*(若项目中还没有该文件，先在 Zed 任务中运行一次 `[Java Launcher] Refresh configurations` 即可自动生成)*。
+*(若项目中还没有该文件，先在 Zed 任务中运行一次 `[Java Launcher] Initialize Project` 即可自动生成)*。
 
 #### 第二步：在 `"groups"` 节点下添加你的组
 ```jsonc
@@ -258,6 +266,7 @@ Java Launcher 遵循极简和透明原则，以下是插件涉及的所有文件
 
 在 Zed 中按 `Cmd+Shift+P` $\rightarrow$ 输入 `task: spawn`：
 
+- **`[Java Launcher] Initialize Project`**：全局初始引导任务。在新工程中一键扫描并生成全部 Zed 任务与调试配置。
 - **`[Java Launcher] Refresh configurations`**：重新扫描工程，刷新任务与调试配置（清爽模式，不生成单服务任务列表）。
 - **`[Java Launcher] Refresh configurations (include main)`**：全量刷新模式。会在任务列表里为每个单服务生成对应的 `Run` / `Restart` / `Stop` 任务。
 - **`[Java Launcher] Group up <组名>`**：后台按顺序拉起组内全部微服务。
