@@ -76,6 +76,11 @@ pub fn generate(
         command(&["stop", "--all"]),
         root,
     ));
+    out.tasks.push(task(
+        &format!("{PREFIX} Clean logs"),
+        command(&["clean-logs"]),
+        root,
+    ));
     for entry in &project.entries {
         let include = entry.kind == EntryKind::SpringBoot
             || (include_main && entry.kind == EntryKind::Main)
@@ -590,9 +595,10 @@ mod tests {
         assert!(gen.tasks.iter().any(|t| t["label"] == "[Java Launcher] Group restart uis"));
         assert!(gen.tasks.iter().any(|t| t["label"] == "[Java Launcher] Group down uis"));
 
-        // 5. Verify Refresh configurations tasks
+        // 5. Verify Refresh configurations tasks and Clean logs task
         assert!(gen.tasks.iter().any(|t| t["label"] == "[Java Launcher] Refresh configurations"));
         assert!(gen.tasks.iter().any(|t| t["label"] == "[Java Launcher] Refresh configurations (include main)"));
+        assert!(gen.tasks.iter().any(|t| t["label"] == "[Java Launcher] Clean logs"));
 
         // 6. Verify single service tasks with include_main
         let gen_main = generate(&project, &config, &config_path, &binary, true, false).unwrap();

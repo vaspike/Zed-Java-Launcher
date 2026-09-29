@@ -112,6 +112,8 @@ enum Action {
         #[arg(short = 'o', long)]
         zed: bool,
     },
+    /// Truncate and clean all service logs and DAP debug logs for this project.
+    CleanLogs,
     /// Run Debug Adapter Protocol (DAP) server for Zed integration.
     Dap {
         #[arg(long)]
@@ -234,6 +236,23 @@ fn execute() -> Result<()> {
         let status = cmd.status().context("Failed to run tail command")?;
         if !status.success() {
             std::process::exit(status.code().unwrap_or(1));
+        }
+        return Ok(());
+    }
+    if matches!(command, Action::CleanLogs) {
+        let result = runtime::clean_logs(&root)?;
+        if result.files.is_empty() {
+            println!("No log files found. Logs are clean.");
+        } else {
+            println!(
+                "Cleaned {} log file{} (freed {}):",
+                result.files.len(),
+                if result.files.len() > 1 { "s" } else { "" },
+                runtime::format_bytes(result.total_bytes)
+            );
+            for (name, freed) in &result.files {
+                println!("  • {name} (freed {})", runtime::format_bytes(*freed));
+            }
         }
         return Ok(());
     }

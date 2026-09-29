@@ -618,3 +618,77 @@ pub fn open_in_zed(path: &Path) -> Result<()> {
 
     bail!("Failed to launch Zed editor. Make sure 'zed' CLI or Zed.app is installed.")
 }
+
+#[derive(Debug, Default)]
+pub struct CleanResult {
+    pub files: Vec<(String, u64)>,
+    pub total_bytes: u64,
+}
+
+pub fn format_bytes(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = 1024 * KB;
+    const GB: u64 = 1024 * MB;
+    if bytes >= GB {
+        format!("{:.2} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.2} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.2} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+pub fn clean_logs(root: &Path) -> Result<CleanResult> {
+    let mut files = vec![];
+    let mut total_bytes = 0u64;
+
+    let dir = state_dir(root)?;
+    if dir.exists() {
+        let mut entry_names = std::collections::BTreeMap::new();
+        for entry in fs::read_dir(&dir)? {
+            let path = entry?.path();
+            if path.extension().is_some_and(|e| e == "json") {
+                if let Ok(st) = config::read_json::<Status>(&path) {
+                    let stem = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+                    entry_names.insert(stem, st.entry);
+                }
+            }
+        }
+
+        for entry in fs::read_dir(&dir)? {
+            let path = entry?.path();
+            if path.extension().is_some_and(|e| e == "log") {
+                if let Ok(meta) = path.metadata() {
+                    let len = meta.len();
+                    if let Ok(f) = fs::OpenOptions::new().write(true).truncate(true).open(&path) {
+                        drop(f);
+                        let stem = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+                        let display_name = entry_names.get(&stem).cloned().unwrap_or_else(|| {
+                            path.file_name().unwrap_or_default().to_string_lossy().into_owned()
+                        });
+                        files.push((display_name, len));
+                        total_bytes += len;
+                    }
+                }
+            }
+        }
+    }
+
+    let dap_log = PathBuf::from("/tmp/java-launcher-dap.log");
+    if dap_log.exists() {
+        if let Ok(meta) = dap_log.metadata() {
+            let len = meta.len();
+            if let Ok(f) = fs::OpenOptions::new().write(true).truncate(true).open(&dap_log) {
+                drop(f);
+                files.push(("java-launcher-dap.log".to_string(), len));
+                total_bytes += len;
+            }
+        }
+    }
+
+    files.sort_by(|a, b| a.0.cmp(&b.0));
+
+    Ok(CleanResult { files, total_bytes })
+}

@@ -117,6 +117,11 @@ fn import_and_sync_preserve_profile_and_user_configs() {
         .unwrap()
         .iter()
         .any(|v| v["label"] == "[Java Launcher] Refresh configurations (include main)"));
+    assert!(ts
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v["label"] == "[Java Launcher] Clean logs"));
     assert!(!ts
         .as_array()
         .unwrap()
@@ -350,4 +355,34 @@ fn terminate_on_zed_quit_respects_config() {
     let status = f.ok(&["start", "App", "--skip-build"]);
     assert_eq!(status["entry"], "app::demo.App");
     assert!(status["watch_pid"].is_null());
+}
+
+#[test]
+fn clean_logs_truncates_state_and_dap_logs() {
+    let f = Fixture::new();
+    f.write(
+        "pom.xml",
+        r#"<project><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>root</artifactId><version>1</version><packaging>pom</packaging><modules><module>app</module></modules></project>"#,
+    );
+    f.write(
+        "app/pom.xml",
+        r#"<project><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>app</artifactId><version>1</version></project>"#,
+    );
+    f.source("app", "App");
+
+    let status = f.ok(&["start", "App", "--skip-build"]);
+    let log_path = status["log"].as_str().unwrap();
+    assert!(Path::new(log_path).exists());
+
+    // Write some content into the log file
+    fs::write(log_path, "Log output line 1\nLog output line 2\n").unwrap();
+    assert!(fs::metadata(log_path).unwrap().len() > 0);
+
+    let out = f.run(&["clean-logs"]);
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("Cleaned"));
+    assert_eq!(fs::metadata(log_path).unwrap().len(), 0);
+
+    f.ok(&["stop", "--all"]);
 }
