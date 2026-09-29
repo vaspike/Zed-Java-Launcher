@@ -185,6 +185,11 @@ pub fn generate(
             root,
         ));
         out.tasks.push(task(
+            &format!("{PREFIX} Group restart {name}"),
+            command(&["group", "restart", name]),
+            root,
+        ));
+        out.tasks.push(task(
             &format!("{PREFIX} Group down {name}"),
             command(&["group", "down", name]),
             root,
@@ -566,6 +571,11 @@ mod tests {
         // 3. Verify Attach localhost:5005 is NOT generated
         let attach = gen.debug.iter().find(|d| d["label"].as_str().unwrap_or("").contains("5005"));
         assert!(attach.is_none(), "Attach 5005 must not be generated");
+
+        // 4. Verify Group tasks (up, restart, down)
+        assert!(gen.tasks.iter().any(|t| t["label"] == "[Java Launcher] Group up uis"));
+        assert!(gen.tasks.iter().any(|t| t["label"] == "[Java Launcher] Group restart uis"));
+        assert!(gen.tasks.iter().any(|t| t["label"] == "[Java Launcher] Group down uis"));
     }
 
     #[test]

@@ -130,6 +130,7 @@ enum Action {
 enum GroupAction {
     Up,
     Down,
+    Restart,
 }
 fn print_json(value: &impl serde::Serialize) -> Result<()> {
     println!("{}", serde_json::to_string_pretty(value)?);
@@ -274,6 +275,23 @@ fn execute() -> Result<()> {
         }
         return Ok(());
     }
+    if let Action::Group {
+        action: GroupAction::Restart,
+        name,
+        ..
+    } = &command
+    {
+        let items = config
+            .groups
+            .get(name)
+            .with_context(|| format!("Unknown group {name}"))?;
+        for item in items.iter().rev() {
+            if runtime::request(&root, &item.entry, "status").is_ok() {
+                runtime::stop(&root, &item.entry)?;
+                println!("Stopped {}", item.entry);
+            }
+        }
+    }
     let project = scan::scan(&root)?;
     warn(&project.warnings);
     match command {
@@ -398,7 +416,7 @@ fn execute() -> Result<()> {
             );
         }
         Action::Group {
-            action: GroupAction::Up,
+            action: GroupAction::Up | GroupAction::Restart,
             name,
             skip_build,
         } => {

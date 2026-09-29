@@ -274,6 +274,16 @@ fn real_jvm_group_lifecycle_releases_ports_and_preserves_unrelated_process() {
     let after = f.ok(&["ps"])[0]["supervisor_pid"].clone();
     assert_ne!(before, after);
     f.ok(&["stop", "--all"]);
+
+    f.ok(&["group", "up", "demo"]);
+    assert_eq!(f.ok(&["ps"]).as_array().unwrap().len(), 2);
+    let before_pids: Vec<_> = f.ok(&["ps"]).as_array().unwrap().iter().map(|s| s["supervisor_pid"].clone()).collect();
+    f.ok(&["group", "restart", "demo"]);
+    assert_eq!(f.ok(&["ps"]).as_array().unwrap().len(), 2);
+    let after_pids: Vec<_> = f.ok(&["ps"]).as_array().unwrap().iter().map(|s| s["supervisor_pid"].clone()).collect();
+    assert_ne!(before_pids, after_pids);
+    f.ok(&["group", "down", "demo"]);
+    assert_eq!(f.ok(&["ps"]), json!([]));
 }
 
 #[test]
