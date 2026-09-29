@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "request": {
+      "type": "string",
+      "enum": ["launch"],
+      "description": "Request type for Java Launcher, always 'launch'."
+    },
+    "group": {
+      "type": "string",
+      "description": "Microservice group name to launch (defined in .java-launcher/config.json)."
+    },
+    "entry": {
+      "type": "string",
+      "description": "Specific microservice or application entry to launch."
+    },
+    "skipBuild": {
+      "type": "boolean",
+      "description": "Skip compilation step when launching."
+    },
+    "debugPort": {
+      "type": "integer",
+      "description": "Optional JDWP debug port to open for the Java process."
+    }
+  },
+  "required": ["request"]
+}

@@ -37,7 +37,7 @@ if [[ ":$PATH:" != *":${INSTALL_BIN_DIR}:"* ]]; then
 fi
 
 # 2. Install Zed extension directly into Zed's extensions directory
-ZED_EXT_DIR="${HOME}/Library/Application Support/Zed/extensions/installed/zed-java-launcher"
+ZED_EXT_DIR="${HOME}/Library/Application Support/Zed/extensions/installed/java-launcher"
 echo "-> [2/3] Installing Zed extension to:"
 echo "   ${ZED_EXT_DIR}..."
 rm -rf "${ZED_EXT_DIR}"
