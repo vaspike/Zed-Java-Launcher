@@ -121,6 +121,12 @@ Press `Cmd+Shift+P` -> type `task: spawn`:
 - **`[JL] <Service>: Restart`**: Restarts this single background service.
 - **`[JL] <Service>: Stop`**: Stops this single background service.
 
+> 💡 **Clean Mode vs Full Mode (Prevent Task Palette Clutter)**:
+> In microservice projects with dozens of services, generating `Run`, `Restart`, and `Stop` for every single app can spam your Zed task palette with 60+ entries.
+> - **`Refresh configurations` (Clean Mode, recommended)**: Keeps your task palette tidy by only generating Group and admin tasks (individual services can always be debugged from the Debug panel).
+> - **`Refresh configurations (include main)` (Full Mode)**: Generates individual `[JL] <Service>: Run / Restart / Stop` tasks for every service in your project.
+> - **Easily reversible**: Switching back to clean mode is as simple as clicking the default `Refresh configurations` task again anytime.
+
 ---
 
 ### Migrating from VS Code
@@ -263,6 +269,12 @@ Java Launcher 遵循极简和透明原则，以下是插件涉及的所有文件
 - **`[JL] <服务名>: Run`**：在前台终端运行该单服务（控制台直显日志，按 `Ctrl+C` 直接终止）。
 - **`[JL] <服务名>: Restart`**：单独重启该后台服务。
 - **`[JL] <服务名>: Stop`**：单独停止该后台服务。
+
+> 💡 **清爽模式 vs 全量模式（告别任务列表刷屏）**：
+> 大型工程往往有几十个微服务，如果无脑把每个服务的 `Run`、`Restart`、`Stop` 全写进任务列表，会导致 Zed 快捷键弹窗瞬间被几十上百个任务挤爆。
+> - **`Refresh configurations`（清爽模式，推荐）**：只生成组任务与全局运维，保护任务列表不被微服务刷屏（需要单服务调试时，在 Debug 面板直接点即可）。
+> - **`Refresh configurations (include main)`（全量模式）**：如果你习惯在 Zed 任务弹窗里键盘搜单个服务，点击此任务会为每个单服务生成对应的 `[JL] <服务名>: Run / Restart / Stop` 任务。
+> - **随时一键还原**：觉得任务太多时，只需重新点击一次默认的 `Refresh configurations`，未手动修改过的单服务任务会被自动清空，瞬间恢复清爽！
 
 ---
 
