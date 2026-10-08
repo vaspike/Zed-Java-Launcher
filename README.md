@@ -1,6 +1,9 @@
 # Java Launcher for Zed
 
+![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/vaspike/Zed-Java-Launcher/total?style=for-the-badge&color=orange)
+
 [English](#english) | [简体中文](#简体中文)
+
 
 ---
 
