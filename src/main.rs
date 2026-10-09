@@ -10,7 +10,7 @@ mod zed;
 use anyhow::{bail, Context, Result};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use model::EntryKind;
-use std::{path::PathBuf, thread, time::Duration};
+use std::{io::{self, Write}, path::PathBuf, thread, time::Duration};
 
 #[derive(Parser)]
 #[command(
@@ -98,13 +98,17 @@ enum Action {
     Restart(RunArgs),
     /// Persist the Spring profile without changing other launch options.
     Profile { entry: String, profile: String },
-    /// View or tail real-time logs for a managed entry.
+    /// View or tail real-time logs for a managed entry. If omitted, prompts to select from active processes.
+    #[command(alias = "log")]
     Logs {
-        /// Stable ID, full class name, or unambiguous module name.
-        entry: String,
-        /// Stream log output in real time (like tail -f).
-        #[arg(short, long)]
+        /// Stable ID, full class name, or unambiguous module name. If omitted, prompts to select from active processes.
+        entry: Option<String>,
+        /// Stream log output in real time (like tail -f). Defaults to true.
+        #[arg(short, long, default_value_t = true)]
         follow: bool,
+        /// Do not stream logs; print the last N lines and exit.
+        #[arg(long)]
+        no_follow: bool,
         /// Number of lines to show from the end of the log.
         #[arg(short = 'n', long, default_value_t = 100)]
         lines: usize,
@@ -114,6 +118,8 @@ enum Action {
     },
     /// Truncate and clean all service logs and DAP debug logs for this project.
     CleanLogs,
+    /// Clean JDTLS workspace cache, stray Eclipse metadata, and ghost module directories.
+    CleanJdtls,
     /// Run Debug Adapter Protocol (DAP) server for Zed integration.
     Dap {
         #[arg(long)]
@@ -205,14 +211,98 @@ fn execute() -> Result<()> {
     if let Action::Logs {
         entry,
         follow,
+        no_follow,
         lines,
         zed,
     } = &command
     {
-        let id = if runtime::request(&root, entry, "status").is_ok() {
-            entry.clone()
-        } else {
-            scan::scan(&root)?.entry(entry)?.id.clone()
+        let is_follow = if *no_follow { false } else { *follow };
+        let id = match entry {
+            Some(e) => {
+                if runtime::request(&root, e, "status").is_ok() {
+                    e.clone()
+                } else {
+                    scan::scan(&root)?.entry(e)?.id.clone()
+                }
+            }
+            None => {
+                let mut active_statuses: Vec<runtime::Status> = vec![];
+                for s in runtime::statuses(&root)? {
+                    if runtime::request(&root, &s.entry, "status").is_ok() {
+                        active_statuses.push(s);
+                    }
+                }
+                if active_statuses.is_empty() {
+                    println!("⚠️  No active managed processes found in {}", root.display());
+                    println!("💡 You can start a service first:");
+                    println!("   • java-launcher run <entry>");
+                    println!("   • java-launcher group up <group>");
+                    return Ok(());
+                } else if active_statuses.len() == 1 {
+                    let target = &active_statuses[0];
+                    let short_name = target.entry.split("::").next().unwrap_or(&target.entry);
+                    let pid_info = target
+                        .child_pid
+                        .map(|p| format!(" (PID: {p})"))
+                        .unwrap_or_default();
+                    println!(
+                        "Streaming logs for {short_name}{pid_info} (showing last {lines} lines, Ctrl+C to exit)..."
+                    );
+                    println!("--------------------------------------------------------------------------------");
+                    target.entry.clone()
+                } else {
+                    println!("Active processes in {}:", root.display());
+                    for (i, s) in active_statuses.iter().enumerate() {
+                        let short_name = s.entry.split("::").next().unwrap_or(&s.entry);
+                        let pid_str = s
+                            .child_pid
+                            .map(|p| format!("PID: {p}"))
+                            .unwrap_or_else(|| "starting".into());
+                        let port_str = s
+                            .debug_port
+                            .map(|p| format!(", port: {p}"))
+                            .unwrap_or_default();
+                        println!(
+                            "  [{}] {:<16} ({pid_str}{port_str}) - {}",
+                            i + 1,
+                            short_name,
+                            s.entry
+                        );
+                    }
+                    println!();
+                    let selected_idx = loop {
+                        print!(
+                            "Select process [1-{}] (default: 1, Ctrl+C to cancel): ",
+                            active_statuses.len()
+                        );
+                        io::stdout().flush()?;
+                        let mut input = String::new();
+                        io::stdin().read_line(&mut input)?;
+                        let trimmed = input.trim();
+                        if trimmed.is_empty() {
+                            break 0;
+                        }
+                        match trimmed.parse::<usize>() {
+                            Ok(n) if n >= 1 && n <= active_statuses.len() => {
+                                break n - 1;
+                            }
+                            _ => {
+                                println!(
+                                    "Invalid selection '{trimmed}'. Please enter a number between 1 and {}.",
+                                    active_statuses.len()
+                                );
+                            }
+                        }
+                    };
+                    let target = &active_statuses[selected_idx];
+                    let short_name = target.entry.split("::").next().unwrap_or(&target.entry);
+                    println!(
+                        "Streaming logs for {short_name} (showing last {lines} lines, Ctrl+C to exit)..."
+                    );
+                    println!("--------------------------------------------------------------------------------");
+                    target.entry.clone()
+                }
+            }
         };
         let log_path = match runtime::request(&root, &id, "status") {
             Ok(s) => PathBuf::from(s.log),
@@ -229,13 +319,17 @@ fn execute() -> Result<()> {
         }
         let mut cmd = std::process::Command::new("tail");
         cmd.arg("-n").arg(lines.to_string());
-        if *follow {
+        if is_follow {
             cmd.arg("-f");
         }
         cmd.arg(&log_path);
         let status = cmd.status().context("Failed to run tail command")?;
         if !status.success() {
-            std::process::exit(status.code().unwrap_or(1));
+            if let Some(code) = status.code() {
+                if code != 130 {
+                    std::process::exit(code);
+                }
+            }
         }
         return Ok(());
     }
@@ -254,6 +348,10 @@ fn execute() -> Result<()> {
                 println!("  • {name} (freed {})", runtime::format_bytes(*freed));
             }
         }
+        return Ok(());
+    }
+    if matches!(command, Action::CleanJdtls) {
+        runtime::clean_jdtls(&root)?;
         return Ok(());
     }
     if let Action::Stop { entry, all } = &command {

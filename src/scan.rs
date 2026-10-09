@@ -57,6 +57,7 @@ fn maven_modules(
     modules: &mut Vec<Module>,
     seen: &mut BTreeSet<PathBuf>,
     warnings: &mut Vec<String>,
+    parent_group_id: Option<&str>,
 ) -> Result<()> {
     let dir = dir
         .canonicalize()
@@ -77,10 +78,19 @@ fn maven_modules(
     let project = doc.root_element();
     let artifact_id =
         xml_text(project, "artifactId").context("pom.xml lacks project/artifactId")?;
+    let mut group_id = xml_text(project, "groupId")
+        .or_else(|| xml_child(project, "parent").and_then(|p| xml_text(p, "groupId")))
+        .or_else(|| parent_group_id.map(|s| s.to_string()));
+    if let Some(ref gid) = group_id {
+        if gid.contains("${") {
+            group_id = None;
+        }
+    }
     modules.push(Module {
         path: relative(root, &dir),
         artifact_id,
         packaging: xml_text(project, "packaging").unwrap_or("jar".into()),
+        group_id: group_id.clone(),
     });
     if let Some(build) = xml_child(project, "build") {
         for key in ["sourceDirectory", "testSourceDirectory"] {
@@ -103,13 +113,14 @@ fn maven_modules(
             ));
         }
     }
+    let effective_group_id = group_id.as_deref().or(parent_group_id);
     if let Some(list) = xml_child(project, "modules") {
         for module in list.children().filter(|n| n.has_tag_name("module")) {
             let name = module.text().unwrap_or("").trim();
             if name.is_empty() || name.contains("${") {
                 bail!("Unsupported module path in {}: {name}", pom.display());
             }
-            maven_modules(root, &dir.join(name), modules, seen, warnings)?;
+            maven_modules(root, &dir.join(name), modules, seen, warnings, effective_group_id)?;
         }
     }
     Ok(())
@@ -134,6 +145,7 @@ pub fn scan(root: &Path) -> Result<Project> {
             &mut project.modules,
             &mut BTreeSet::new(),
             &mut project.warnings,
+            None,
         )?;
     } else {
         if [
@@ -157,6 +169,7 @@ pub fn scan(root: &Path) -> Result<Project> {
                 .to_string_lossy()
                 .into_owned(),
             packaging: "plain".into(),
+            group_id: None,
         });
     }
     let mut parser = Parser::new();
@@ -415,6 +428,7 @@ mod tests {
                 path: "api".into(),
                 artifact_id: "api".into(),
                 packaging: "jar".into(),
+                group_id: None,
             },
             "App.java",
         )

@@ -49,6 +49,12 @@ fi
 if [[ -f "${SCRIPT_DIR}/README.md" ]]; then
     cp -f "${SCRIPT_DIR}/README.md" "${ZED_EXT_DIR}/README.md"
 fi
+if [[ -d "${SCRIPT_DIR}/debug_adapter_schemas" ]]; then
+    cp -r "${SCRIPT_DIR}/debug_adapter_schemas" "${ZED_EXT_DIR}/debug_adapter_schemas"
+fi
+mkdir -p "${ZED_EXT_DIR}/bin"
+cp -f "${BIN_SRC}" "${ZED_EXT_DIR}/bin/java-launcher"
+chmod +x "${ZED_EXT_DIR}/bin/java-launcher"
 
 # 3. Register Global Bootstrap Tasks in Zed (~/.config/zed/tasks.json)
 ZED_CONFIG_DIR="${HOME}/.config/zed"

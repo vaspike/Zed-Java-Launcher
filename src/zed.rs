@@ -81,6 +81,16 @@ pub fn generate(
         command(&["clean-logs"]),
         root,
     ));
+    out.tasks.push(task(
+        &format!("{PREFIX} Clean JDTLS cache"),
+        command(&["clean-jdtls"]),
+        root,
+    ));
+    out.tasks.push(task(
+        &format!("{PREFIX} Live logs"),
+        command(&["log"]),
+        root,
+    ));
     for entry in &project.entries {
         let include = entry.kind == EntryKind::SpringBoot
             || (include_main && entry.kind == EntryKind::Main)
@@ -609,6 +619,7 @@ mod tests {
         assert!(gen.tasks.iter().any(|t| t["label"] == "[Java Launcher] Refresh configurations"));
         assert!(gen.tasks.iter().any(|t| t["label"] == "[Java Launcher] Refresh configurations (include main)"));
         assert!(gen.tasks.iter().any(|t| t["label"] == "[Java Launcher] Clean logs"));
+        assert!(gen.tasks.iter().any(|t| t["label"] == "[Java Launcher] Live logs"));
 
         // 6. Verify single service tasks with include_main
         let gen_main = generate(&project, &config, &config_path, &binary, true, false).unwrap();

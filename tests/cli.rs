@@ -430,3 +430,77 @@ fn sync_zed_generates_schema_and_group_validation_hints() {
     assert!(stderr.contains("Available services in this project"));
     assert!(stderr.contains("app::demo.App"));
 }
+
+#[test]
+fn plan_collects_reactor_modules_and_excludes_entry_and_pom_packaging() {
+    let f = Fixture::new();
+    f.write(
+        "pom.xml",
+        r#"<project><modelVersion>4.0.0</modelVersion><groupId>com.example</groupId><artifactId>root</artifactId><version>1.0.0</version><packaging>pom</packaging><modules><module>lib</module><module>app</module></modules></project>"#,
+    );
+    f.write(
+        "lib/pom.xml",
+        r#"<project><modelVersion>4.0.0</modelVersion><parent><groupId>com.example</groupId><artifactId>root</artifactId><version>1.0.0</version></parent><artifactId>lib</artifactId></project>"#,
+    );
+    f.write(
+        "app/pom.xml",
+        r#"<project><modelVersion>4.0.0</modelVersion><parent><groupId>com.example</groupId><artifactId>root</artifactId><version>1.0.0</version></parent><artifactId>app</artifactId></project>"#,
+    );
+    f.source("app", "App");
+    f.source("lib", "Helper");
+
+    let plan = f.ok(&["plan", "app::demo.App"]);
+    let rms = plan["reactor_modules"].as_array().expect("reactor_modules present");
+    assert_eq!(rms.len(), 1);
+    assert_eq!(rms[0]["artifact_id"], "lib");
+    assert_eq!(rms[0]["group_id"], "com.example");
+    assert!(rms[0]["classes_dir"].as_str().unwrap().ends_with("lib/target/classes"));
+
+    // When skipping build, reactor_modules should not be populated
+    let plan_skip = f.ok(&["plan", "--skip-build", "app::demo.App"]);
+    assert!(plan_skip.get("reactor_modules").is_none() || plan_skip["reactor_modules"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn clean_jdtls_removes_stray_metadata_and_ghost_dirs() {
+    let f = Fixture::new();
+    f.write(".project", "<projectDescription></projectDescription>");
+    f.write(".classpath", "<classpath></classpath>");
+    f.write("sub/.project", "<projectDescription></projectDescription>");
+    f.write("sub/.classpath", "<classpath></classpath>");
+    f.write("sub/.factorypath", "<factorypath></factorypath>");
+    f.write("sub/.settings/prefs", "abc");
+    f.write("sub/bin/dummy.class", "123");
+    f.write("ghost/target/stale.class", "456");
+    f.write("module/target/classes/Foo.class", "foo");
+
+    let out = f.run(&["clean-jdtls"]);
+    assert!(out.status.success(), "clean-jdtls failed: {}", String::from_utf8_lossy(&out.stderr));
+
+    assert!(!f.root().join(".project").exists());
+    assert!(!f.root().join(".classpath").exists());
+    assert!(!f.root().join("sub/.project").exists());
+    assert!(!f.root().join("sub/.classpath").exists());
+    assert!(!f.root().join("sub/.factorypath").exists());
+    assert!(!f.root().join("sub/.settings").exists());
+    assert!(!f.root().join("sub/bin").exists());
+    assert!(!f.root().join("ghost").exists());
+    assert!(!f.root().join("module/target/classes").exists());
+}
+
+#[test]
+fn log_when_no_active_processes_prints_helpful_message() {
+    let f = Fixture::new();
+    let out = f.run(&["log"]);
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("No active managed processes found"));
+    assert!(stdout.contains("java-launcher run"));
+
+    // Also test alias 'logs' without entry
+    let out_logs = f.run(&["logs"]);
+    assert!(out_logs.status.success());
+    let stdout_logs = String::from_utf8_lossy(&out_logs.stdout);
+    assert!(stdout_logs.contains("No active managed processes found"));
+}
+

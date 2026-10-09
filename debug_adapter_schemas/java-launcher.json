@@ -15,6 +15,44 @@
       "type": "string",
       "description": "Specific microservice or application entry to launch."
     },
+    "name": {
+      "type": "string",
+      "description": "Short name of the service or launch configuration."
+    },
+    "mainClass": {
+      "type": "string",
+      "description": "Fully qualified Java main class name."
+    },
+    "projectName": {
+      "type": "string",
+      "description": "Module or project name."
+    },
+    "cwd": {
+      "type": "string",
+      "description": "Working directory for the process."
+    },
+    "vmArgs": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "JVM arguments."
+    },
+    "args": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Program arguments."
+    },
+    "env": {
+      "type": "object",
+      "description": "Environment variables."
+    },
+    "console": {
+      "type": "string",
+      "description": "Console type (e.g. integratedTerminal)."
+    },
+    "stopOnEntry": {
+      "type": "boolean",
+      "description": "Whether to pause at main entry."
+    },
     "skipBuild": {
       "type": "boolean",
       "description": "Skip compilation step when launching."

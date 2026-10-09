@@ -692,3 +692,137 @@ pub fn clean_logs(root: &Path) -> Result<CleanResult> {
 
     Ok(CleanResult { files, total_bytes })
 }
+
+pub fn clean_jdtls(root: &Path) -> Result<()> {
+    use sha1::{Digest, Sha1};
+
+    let canonical = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let path_str = canonical.to_string_lossy();
+    let digest = Sha1::digest(path_str.as_bytes());
+    let hash = digest.iter().map(|b| format!("{:02x}", b)).collect::<String>();
+
+    println!("Cleaning JDTLS state for {} (hash: {})...", root.display(), hash);
+
+    // 1. Terminate matching JDTLS processes for this workspace
+    let needle = format!("jdtls-{}", hash);
+    let mut killed = 0;
+    if let Ok(output) = std::process::Command::new("ps").args(["-eo", "pid,command"]).output() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            if line.contains(&needle) && !line.contains("ps -eo") {
+                if let Some(pid_str) = line.split_whitespace().next() {
+                    if let Ok(pid) = pid_str.parse::<i32>() {
+                        unsafe {
+                            libc::kill(pid, libc::SIGKILL);
+                        }
+                        killed += 1;
+                    }
+                }
+            }
+        }
+    }
+    if killed > 0 {
+        println!("  • Terminated {} running JDTLS process(es)", killed);
+    }
+
+    // 2. Remove workspace cache directory
+    let cache_dir = if let Ok(xdg) = std::env::var("XDG_CACHE_HOME") {
+        PathBuf::from(xdg)
+    } else if cfg!(target_os = "macos") {
+        if let Ok(home) = std::env::var("HOME") {
+            PathBuf::from(home).join("Library/Caches")
+        } else {
+            PathBuf::from("/tmp")
+        }
+    } else if let Ok(home) = std::env::var("HOME") {
+        PathBuf::from(home).join(".cache")
+    } else {
+        PathBuf::from("/tmp")
+    };
+
+    let target_cache = cache_dir.join(format!("jdtls-{}", hash));
+    if target_cache.exists() {
+        fs::remove_dir_all(&target_cache)
+            .with_context(|| format!("Failed to remove cache {}", target_cache.display()))?;
+        println!("  • Removed cache directory: {}", target_cache.display());
+    } else {
+        println!("  • Cache directory was clean: {}", target_cache.display());
+    }
+
+    // 3. Clean stray Eclipse metadata in project tree
+    let mut cleaned_files = 0;
+    let mut cleaned_dirs = 0;
+    for entry in walkdir::WalkDir::new(root).max_depth(3).into_iter().flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy();
+        if path.is_file() && (name == ".project" || name == ".classpath" || name == ".factorypath") {
+            let _ = fs::remove_file(path);
+            cleaned_files += 1;
+        }
+    }
+    for entry in walkdir::WalkDir::new(root).max_depth(3).into_iter().flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy();
+        if path.is_dir() && (name == ".settings" || name == "bin") {
+            let _ = fs::remove_dir_all(path);
+            cleaned_dirs += 1;
+        }
+    }
+    if cleaned_files > 0 || cleaned_dirs > 0 {
+        println!("  • Removed {} stray metadata files and {} directories", cleaned_files, cleaned_dirs);
+    }
+
+    // 4. Clean empty ghost module folders that lack pom.xml/build.gradle
+    let mut removed_ghosts = 0;
+    if let Ok(rd) = fs::read_dir(root) {
+        for entry in rd.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+                if !name.starts_with('.') && name != "target" && name != "src" {
+                    let pom = path.join("pom.xml");
+                    let build_gradle = path.join("build.gradle");
+                    let build_gradle_kts = path.join("build.gradle.kts");
+                    if !pom.exists() && !build_gradle.exists() && !build_gradle_kts.exists() {
+                        let sub_entries: Vec<_> = fs::read_dir(&path)
+                            .map(|iter| iter.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
+                            .unwrap_or_default();
+                        let is_ghost = !sub_entries.is_empty()
+                            && sub_entries
+                                .iter()
+                                .all(|n| n == "target" || n == "build" || n == ".DS_Store");
+                        if is_ghost {
+                            let _ = fs::remove_dir_all(&path);
+                            removed_ghosts += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if removed_ghosts > 0 {
+        println!("  • Removed {} ghost module directories left by git branch switch", removed_ghosts);
+    }
+
+    // 5. Clean stale/poisoned compiler output in target/classes or build/classes
+    let mut cleaned_classes = 0;
+    for entry in walkdir::WalkDir::new(root).max_depth(4).into_iter().flatten() {
+        let path = entry.path();
+        if path.is_dir() && path.file_name().map(|n| n == "classes").unwrap_or(false) {
+            if let Some(parent) = path.parent() {
+                let parent_name = parent.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
+                if parent_name == "target" || parent_name == "build" {
+                    let _ = fs::remove_dir_all(path);
+                    cleaned_classes += 1;
+                }
+            }
+        }
+    }
+    if cleaned_classes > 0 {
+        println!("  • Removed {} compiler classes directories to prevent ECJ/javac cache poisoning", cleaned_classes);
+    }
+
+    println!("✅ JDTLS clean completed!");
+    println!("👉 In Zed, press Cmd+Shift+P and run: 'editor: restart language server'");
+    Ok(())
+}

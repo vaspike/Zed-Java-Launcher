@@ -1,6 +1,6 @@
 id = "java-launcher"
 name = "Java Launcher"
-version = "1.5.0"
+version = "1.6.0"
 schema_version = 1
 description = "Fast Java & Spring Boot multi-module launcher and DAP group orchestrator for Zed."
 repository = "https://github.com/vaspike/zed-java-launcher"
